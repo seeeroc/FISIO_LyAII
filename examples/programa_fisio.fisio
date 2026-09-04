@@ -1,0 +1,224 @@
+Inicio
+
+mru(velocidad := 5, tiempo := 1);
+posicion1 := velocidad * tiempo;
+velocidadMedia1 := posicion1 / tiempo;
+graficar(posicion1);
+
+mru(velocidad := 10, tiempo := 2);
+posicion2 := velocidad * tiempo;
+velocidadMedia2 := posicion2 / tiempo;
+graficar(posicion2);
+
+mru(velocidad := 15, tiempo := 3);
+posicion3 := velocidad * tiempo;
+velocidadMedia3 := posicion3 / tiempo;
+graficar(posicion3);
+
+mru(velocidad := 20, tiempo := 4);
+posicion4 := velocidad * tiempo;
+velocidadMedia4 := posicion4 / tiempo;
+graficar(posicion4);
+
+mru(velocidad := 25, tiempo := 5);
+posicion5 := velocidad * tiempo;
+velocidadMedia5 := posicion5 / tiempo;
+graficar(posicion5);
+
+mru(velocidad := 30, tiempo := 6);
+posicion6 := velocidad * tiempo;
+velocidadMedia6 := posicion6 / tiempo;
+graficar(posicion6);
+
+mru(velocidad := 35, tiempo := 7);
+posicion7 := velocidad * tiempo;
+velocidadMedia7 := posicion7 / tiempo;
+graficar(posicion7);
+
+mru(velocidad := 40, tiempo := 8);
+posicion8 := velocidad * tiempo;
+velocidadMedia8 := posicion8 / tiempo;
+graficar(posicion8);
+
+mru(velocidad := 45, tiempo := 9);
+posicion9 := velocidad * tiempo;
+velocidadMedia9 := posicion9 / tiempo;
+graficar(posicion9);
+
+mru(velocidad := 50, tiempo := 10);
+posicion10 := velocidad * tiempo;
+velocidadMedia10 := posicion10 / tiempo;
+graficar(posicion10);
+
+mrua(aceleracion := 1, velocidad := 2, tiempo := 10);
+altura1 := 100 - 0.5 * aceleracion * tiempo ^ 2;
+velocidadFinal1 := velocidad + aceleracion * tiempo;
+simular(altura1);
+
+mrua(aceleracion := 2, velocidad := 4, tiempo := 10);
+altura2 := 100 - 0.5 * aceleracion * tiempo ^ 2;
+velocidadFinal2 := velocidad + aceleracion * tiempo;
+simular(altura2);
+
+mrua(aceleracion := 3, velocidad := 6, tiempo := 10);
+altura3 := 100 - 0.5 * aceleracion * tiempo ^ 2;
+velocidadFinal3 := velocidad + aceleracion * tiempo;
+simular(altura3);
+
+mrua(aceleracion := 4, velocidad := 8, tiempo := 10);
+altura4 := 100 - 0.5 * aceleracion * tiempo ^ 2;
+velocidadFinal4 := velocidad + aceleracion * tiempo;
+simular(altura4);
+
+mrua(aceleracion := 5, velocidad := 10, tiempo := 10);
+altura5 := 100 - 0.5 * aceleracion * tiempo ^ 2;
+velocidadFinal5 := velocidad + aceleracion * tiempo;
+simular(altura5);
+
+mrua(aceleracion := 6, velocidad := 12, tiempo := 10);
+altura6 := 100 - 0.5 * aceleracion * tiempo ^ 2;
+velocidadFinal6 := velocidad + aceleracion * tiempo;
+simular(altura6);
+
+mrua(aceleracion := 7, velocidad := 14, tiempo := 10);
+altura7 := 100 - 0.5 * aceleracion * tiempo ^ 2;
+velocidadFinal7 := velocidad + aceleracion * tiempo;
+simular(altura7);
+
+mrua(aceleracion := 8, velocidad := 16, tiempo := 10);
+altura8 := 100 - 0.5 * aceleracion * tiempo ^ 2;
+velocidadFinal8 := velocidad + aceleracion * tiempo;
+simular(altura8);
+
+mrua(aceleracion := 9, velocidad := 18, tiempo := 10);
+altura9 := 100 - 0.5 * aceleracion * tiempo ^ 2;
+velocidadFinal9 := velocidad + aceleracion * tiempo;
+simular(altura9);
+
+mrua(aceleracion := 10, velocidad := 20, tiempo := 10);
+altura10 := 100 - 0.5 * aceleracion * tiempo ^ 2;
+velocidadFinal10 := velocidad + aceleracion * tiempo;
+simular(altura10);
+
+caida(gravedad := 9.9);
+tiempoCaida1 := raiz(2 * altura1 / gravedad);
+velocidadImpacto1 := gravedad * tiempoCaida1;
+despejar(tiempoCaida1);
+
+caida(gravedad := 10.0);
+tiempoCaida2 := raiz(2 * altura2 / gravedad);
+velocidadImpacto2 := gravedad * tiempoCaida2;
+despejar(tiempoCaida2);
+
+caida(gravedad := 10.1);
+tiempoCaida3 := raiz(2 * altura3 / gravedad);
+velocidadImpacto3 := gravedad * tiempoCaida3;
+despejar(tiempoCaida3);
+
+caida(gravedad := 10.2);
+tiempoCaida4 := raiz(2 * altura4 / gravedad);
+velocidadImpacto4 := gravedad * tiempoCaida4;
+despejar(tiempoCaida4);
+
+caida(gravedad := 10.3);
+tiempoCaida5 := raiz(2 * altura5 / gravedad);
+velocidadImpacto5 := gravedad * tiempoCaida5;
+despejar(tiempoCaida5);
+
+caida(gravedad := 10.4);
+tiempoCaida6 := raiz(2 * altura6 / gravedad);
+velocidadImpacto6 := gravedad * tiempoCaida6;
+despejar(tiempoCaida6);
+
+caida(gravedad := 10.5);
+tiempoCaida7 := raiz(2 * altura7 / gravedad);
+velocidadImpacto7 := gravedad * tiempoCaida7;
+despejar(tiempoCaida7);
+
+angulo1 := 15;
+parabolico(alcance := 31, altura := 6);
+componenteX1 := magnitud(velocidad) * coseno(angulo1);
+componenteY1 := magnitud(velocidad) * seno(angulo1);
+alcanceMaximo1 := (velocidad ^ 2) * seno(2 * angulo1) / gravedad;
+graficar(alcanceMaximo1);
+
+angulo2 := 30;
+parabolico(alcance := 32, altura := 7);
+componenteX2 := magnitud(velocidad) * coseno(angulo2);
+componenteY2 := magnitud(velocidad) * seno(angulo2);
+alcanceMaximo2 := (velocidad ^ 2) * seno(2 * angulo2) / gravedad;
+graficar(alcanceMaximo2);
+
+angulo3 := 45;
+parabolico(alcance := 33, altura := 8);
+componenteX3 := magnitud(velocidad) * coseno(angulo3);
+componenteY3 := magnitud(velocidad) * seno(angulo3);
+alcanceMaximo3 := (velocidad ^ 2) * seno(2 * angulo3) / gravedad;
+graficar(alcanceMaximo3);
+
+angulo4 := 60;
+parabolico(alcance := 34, altura := 9);
+componenteX4 := magnitud(velocidad) * coseno(angulo4);
+componenteY4 := magnitud(velocidad) * seno(angulo4);
+alcanceMaximo4 := (velocidad ^ 2) * seno(2 * angulo4) / gravedad;
+graficar(alcanceMaximo4);
+
+angulo5 := 75;
+parabolico(alcance := 35, altura := 10);
+componenteX5 := magnitud(velocidad) * coseno(angulo5);
+componenteY5 := magnitud(velocidad) * seno(angulo5);
+alcanceMaximo5 := (velocidad ^ 2) * seno(2 * angulo5) / gravedad;
+graficar(alcanceMaximo5);
+
+angulo6 := 90;
+parabolico(alcance := 36, altura := 11);
+componenteX6 := magnitud(velocidad) * coseno(angulo6);
+componenteY6 := magnitud(velocidad) * seno(angulo6);
+alcanceMaximo6 := (velocidad ^ 2) * seno(2 * angulo6) / gravedad;
+graficar(alcanceMaximo6);
+
+angulo7 := 105;
+parabolico(alcance := 37, altura := 12);
+componenteX7 := magnitud(velocidad) * coseno(angulo7);
+componenteY7 := magnitud(velocidad) * seno(angulo7);
+alcanceMaximo7 := (velocidad ^ 2) * seno(2 * angulo7) / gravedad;
+graficar(alcanceMaximo7);
+
+muestras[0] := 3;
+muestras[1] := 6;
+muestras[2] := 9;
+muestras[3] := 12;
+muestras[4] := 15;
+muestras[5] := 18;
+muestras[6] := 21;
+muestras[7] := 24;
+muestras[8] := 27;
+muestras[9] := 30;
+muestras[10] := 33;
+muestras[11] := 36;
+muestras[12] := 39;
+muestras[13] := 42;
+muestras[14] := 45;
+
+despejar(muestras[3]);
+graficar(muestras[7]);
+simular(muestras[9]);
+graficar(muestras[12]);
+despejar(muestras[14]);
+
+esRapido := velocidad > 15;
+esLento := velocidad <= 5;
+tiemposIguales := tiempoCaida1 = tiempoCaida2;
+gravedadValida := gravedad != 0;
+alcanceMenor := alcanceMaximo1 < alcanceMaximo4;
+alturaMayorIgual := altura5 >= altura1;
+
+masa := 70;
+energiaCinetica := 0.5 * masa * velocidad ^ 2;
+energiaPotencial := masa * gravedad * altura5;
+energiaTotal := (energiaCinetica + energiaPotencial) / 2;
+anguloFinal := 45;
+factorSeguridad := raiz(energiaTotal) + seno(anguloFinal);
+magnitudTotal := magnitud(energiaTotal);
+
+Fin

@@ -1,0 +1,21 @@
+# Salida de compilacion de Maven (generada por mvnw clean/compile/package).
+# Incluye el lexer/parser generado por JavaCC (target/generated-sources) y
+# las clases compiladas (target/classes) -- ninguna de las dos se versiona,
+# se regeneran siempre desde src/main/javacc y src/main/java.
+target/
+
+# Artefactos de compilacion sueltos, por si se compila fuera de target/.
+*.class
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+nbproject/
+
+# Archivos de SO
+.DS_Store
+Thumbs.db

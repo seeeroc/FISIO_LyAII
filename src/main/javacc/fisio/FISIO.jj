@@ -1,0 +1,890 @@
+/*
+ * Especificacion lexica de FISIO (Paso 2, CONGELADA desde el Paso 3.1) +
+ * gramatica sintactica real para entrada VALIDA (Paso 5A, CONGELADA) +
+ * recuperacion sintactica completa con multiples errores (Paso 5B-2).
+ * Fuentes de verdad: FISIO - Documento Final.pdf, parser.py, gui.py, programa_fisio.fisio.
+ *
+ * Paso 5B-2 -- cambio de arquitectura respecto a 5B-1: parser.py NUNCA usa
+ * excepciones; cada parse_X() retorna None en sus rutas de error y dos
+ * responsabilidades quedan SEPARADAS: (a) registrar el error en self.errores
+ * (efecto secundario, _error_actual) y (b) decidir si la produccion aborta
+ * (return None) o sigue construyendo con datos parciales -- eso lo decide
+ * CADA metodo por separado, no hay una regla global. La sincronizacion
+ * (_sincronizar) SOLO ocurre en 3 lugares de todo parser.py: parse_sentencia
+ * (caso ';' vacio -- sin sincronizar, solo avanza 1; caso dispatch fallido;
+ * caso sub-produccion devolvio None) y parse() (Inicio repetido). Ninguna
+ * produccion interna (Params, Factor, Lugar, etc.) sincroniza por su cuenta.
+ * Replicamos exactamente esto: cada produccion JavaCC retorna null (no
+ * lanza excepcion) en sus puntos de fallo, igual que Python.
+ */
+
+options
+{
+    STATIC = false;
+}
+
+PARSER_BEGIN(FISIOParser)
+package fisio;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import fisio.ast.NodoAST;
+import fisio.ast.NodoAccesoArreglo;
+import fisio.ast.NodoAgrupacion;
+import fisio.ast.NodoAsignacion;
+import fisio.ast.NodoCalculo;
+import fisio.ast.NodoComando;
+import fisio.ast.NodoIdentificador;
+import fisio.ast.NodoNumero;
+import fisio.ast.NodoOperacion;
+import fisio.ast.NodoOperacionRelacional;
+import fisio.ast.NodoParametro;
+import fisio.ast.NodoPrograma;
+import fisio.ast.NodoVariableFisica;
+import fisio.analysis.ErrorSintactico;
+import fisio.token.CategoriaToken;
+import fisio.token.MapeoTokens;
+import fisio.token.TokenFisio;
+
+public class FISIOParser
+{
+    /* Equivalente a self.errores en Parser.__init__ -- efecto secundario
+       que se acumula, totalmente independiente de si una produccion aborta
+       (return null) o sigue construyendo AST. */
+    private final List<ErrorSintactico> errores = new ArrayList<ErrorSintactico>();
+
+    public List<ErrorSintactico> errores()
+    {
+        return List.copyOf(errores);
+    }
+
+    /* ── Conjuntos de primeros-tokens (equivalentes a los frozenset de Parser en parser.py) ── */
+
+    private boolean esVarFisica(int kind)
+    {
+        return kind == FISIOParserConstants.GRAVEDAD || kind == FISIOParserConstants.POSICION
+            || kind == FISIOParserConstants.VELOCIDAD || kind == FISIOParserConstants.ACELERACION
+            || kind == FISIOParserConstants.TIEMPO || kind == FISIOParserConstants.ALTURA
+            || kind == FISIOParserConstants.ALCANCE;
+    }
+
+    private boolean esInicioLugar(int kind)
+    {
+        return kind == FISIOParserConstants.ID || esVarFisica(kind);
+    }
+
+    private boolean esCmdMovimiento(int kind)
+    {
+        return kind == FISIOParserConstants.MRU || kind == FISIOParserConstants.MRUA
+            || kind == FISIOParserConstants.CAIDA || kind == FISIOParserConstants.PARABOLICO;
+    }
+
+    private boolean esCmdFuncion(int kind)
+    {
+        return kind == FISIOParserConstants.DESPEJAR || kind == FISIOParserConstants.GRAFICAR
+            || kind == FISIOParserConstants.SIMULAR;
+    }
+
+    private boolean esCalculo(int kind)
+    {
+        return kind == FISIOParserConstants.RAIZ || kind == FISIOParserConstants.SENO
+            || kind == FISIOParserConstants.COSENO || kind == FISIOParserConstants.MAGNITUD;
+    }
+    /* esOpRelacional() se elimino en el Grupo 3 del Paso 5C: Expresion()
+       volvio a usar el "(...)?" nativo de JavaCC para el OpRelacional
+       opcional, que ya decide por si mismo via lookahead de 1 token sobre
+       los 6 kinds relacionales -- el predicado Java quedaba redundante. */
+
+    /* ── Traduccion Token JavaCC -> TokenFisio, incluido el caso EOF ──
+       Equivalente a _actual() + _crear_eof() en parser.py. */
+
+    private TokenFisio tokenFisioDe(Token t)
+    {
+        if (t.kind == FISIOParserConstants.EOF)
+        {
+            return eofTokenFisio();
+        }
+        return MapeoTokens.crear(t);
+    }
+
+    private TokenFisio eofTokenFisio()
+    {
+        Token ultimo = getToken(0);
+        if (ultimo == null || ultimo.image == null || ultimo.kind == FISIOParserConstants.EOF)
+        {
+            return new TokenFisio("", CategoriaToken.EOF, "EOF", 1, 1);
+        }
+        return new TokenFisio("", CategoriaToken.EOF, "EOF", ultimo.beginLine, ultimo.beginColumn + ultimo.image.length());
+    }
+
+    /* ── Registro de error (equivalente a _error_actual) ──
+       SOLO agrega a errores; NO decide si la produccion aborta o continua
+       -- esa decision la toma cada llamador con su propio "return null"
+       (o no) inmediatamente despues, igual que en parser.py. */
+    private void registrarError(String mensaje)
+    {
+        TokenFisio tf = tokenFisioDe(getToken(1));
+        errores.add(new ErrorSintactico(tf, mensaje, tf.linea(), tf.columna()));
+    }
+
+    /* Equivalente a _coincidir_lexema: si el token actual es el esperado,
+       lo consume y retorna true; si no, NO consume nada y retorna false. */
+    private boolean coincidirToken(int kindEsperado)
+    {
+        if (getToken(1).kind == kindEsperado)
+        {
+            getNextToken();
+            return true;
+        }
+        return false;
+    }
+
+    /* Equivalente EXACTO a _sincronizar(): avanza mientras el token actual
+       no sea ';' ni 'Fin' ni EOF; si se detiene en ';', tambien lo consume;
+       si se detiene en 'Fin' o EOF, NO lo consume. */
+    private void sincronizar()
+    {
+        while (getToken(1).kind != FISIOParserConstants.EOF
+                && getToken(1).kind != FISIOParserConstants.PUNTO_Y_COMA
+                && getToken(1).kind != FISIOParserConstants.FIN)
+        {
+            getNextToken();
+        }
+        if (getToken(1).kind == FISIOParserConstants.PUNTO_Y_COMA)
+        {
+            getNextToken();
+        }
+    }
+
+    /* Equivalente EXACTO a _sincronizar_hasta_eof(): consume todo lo que quede. */
+    private void sincronizarHastaEof()
+    {
+        while (getToken(1).kind != FISIOParserConstants.EOF)
+        {
+            getNextToken();
+        }
+    }
+}
+PARSER_END(FISIOParser)
+
+/* ── Espacios en blanco (igual que lexer.py: " \t" avanza, "\r\n" avanza_linea) ── */
+SKIP:
+{
+    " " | "\t" | "\r" | "\n"
+}
+
+/* ── Palabras reservadas (PR_01..PR_20) — deben ir antes de ID ── */
+TOKEN:
+{
+    < MRU: "mru" >                 // PR_01
+  | < MRUA: "mrua" >               // PR_02
+  | < CAIDA: "caida" >             // PR_03
+  | < PARABOLICO: "parabolico" >   // PR_04
+  | < DESPEJAR: "despejar" >       // PR_05
+  | < GRAFICAR: "graficar" >       // PR_06
+  | < SIMULAR: "simular" >         // PR_07
+  | < RAIZ: "raiz" >               // PR_08
+  | < SENO: "seno" >               // PR_09
+  | < COSENO: "coseno" >           // PR_10
+  | < MAGNITUD: "magnitud" >       // PR_11
+  | < GRAVEDAD: "gravedad" >       // PR_12
+  | < POSICION: "posicion" >       // PR_13
+  | < VELOCIDAD: "velocidad" >     // PR_14
+  | < ACELERACION: "aceleracion" > // PR_15
+  | < TIEMPO: "tiempo" >           // PR_16
+  | < ALTURA: "altura" >           // PR_17
+  | < ALCANCE: "alcance" >         // PR_18
+  | < INICIO: "Inicio" >           // PR_19
+  | < FIN: "Fin" >                 // PR_20
+}
+
+/* ── Operadores matematicos (OPM_01..OPM_05) ── */
+TOKEN:
+{
+    < SUMA: "+" >             // OPM_01
+  | < RESTA: "-" >            // OPM_02
+  | < MULTIPLICACION: "*" >   // OPM_03
+  | < DIVISION: "/" >         // OPM_04
+  | < POTENCIA: "^" >         // OPM_05
+}
+
+/* ── Operadores relacionales / asignacion (OPR_01..OPR_07) ──
+   El longest-match de JavaCC resuelve := vs = y <= vs < y >= vs >
+   sin ambiguedad, sin importar el orden de declaracion. */
+TOKEN:
+{
+    < ASIGNACION: ":=" >    // OPR_01
+  | < IGUALDAD: "=" >       // OPR_02
+  | < MENOR: "<" >          // OPR_03
+  | < MAYOR: ">" >          // OPR_04
+  | < MENOR_IGUAL: "<=" >   // OPR_05
+  | < MAYOR_IGUAL: ">=" >   // OPR_06
+  | < DISTINTO: "!=" >      // OPR_07
+}
+
+/* ── Signos (SIG_01..SIG_07) ──
+   PUNTO se declara igual que en token_types.py (SIG_06), aunque en la
+   gramatica real ningun no-terminal lo usa suelto: solo aparece dentro
+   de NUM. Se mantiene por fidelidad a la especificacion, no se altera
+   el lenguaje para simplificar JavaCC. */
+TOKEN:
+{
+    < PARENTESIS_ABRE: "(" >    // SIG_01
+  | < PARENTESIS_CIERRA: ")" >  // SIG_02
+  | < CORCHETE_ABRE: "[" >      // SIG_03
+  | < CORCHETE_CIERRA: "]" >    // SIG_04
+  | < COMA: "," >               // SIG_05
+  | < PUNTO: "." >              // SIG_06
+  | < PUNTO_Y_COMA: ";" >       // SIG_07
+}
+
+/* ── Identificador ──
+   PDF: "letra (A-Z|a-z) seguida de cero o mas letras o digitos", sin
+   guion bajo ni otros caracteres especiales. lexer.py: _es_letra() solo
+   admite a-z/A-Z; _leer_identificador_o_reservada consume letras/digitos. */
+TOKEN:
+{
+    < ID: ["a"-"z","A"-"Z"] (["a"-"z","A"-"Z","0"-"9"])* >
+}
+
+/* ── Numero (solo formas VALIDAS) ──
+   PDF: Entero = 0 | [1-9][0-9]* ; Decimal = (0|[1-9][0-9]*) "." [0-9]+.
+   Sin cero a la izquierda, sin punto inicial, sin punto final, sin
+   multiples puntos. Los casos invalidos (01, 12a, 1..5, 5., .5) NO deben
+   calzar aqui: caen en LEXEMA_INVALIDO por ser mas largos (ver abajo). */
+TOKEN:
+{
+    < NUM: ("0" | ["1"-"9"] (["0"-"9"])*) ("." (["0"-"9"])+)? >
+}
+
+/* ── Captura de lexemas invalidos (estrategia definitiva, ronda 3) ──
+   Sin MORE, sin estados lexicos. Un solo token de menor prioridad que
+   usa el longest-match de JavaCC: cualquier caracter "no delimitador"
+   (igual criterio que _es_delimitador_lexema en lexer.py, sin contar
+   los math-ops/relacionales/signos/espacios como parte del lexema), MAS
+   dos alternativas especiales para ':' y '!' pegados a otro caracter
+   seguro (para agrupar abc:xyz, a:b, abc!xyz en un solo lexema sin
+   romper x:=5 / x!=5 sin espacios). Declarado DESPUES de ID/NUM/todos
+   los operadores y signos: en un empate de longitud, ellos ganan
+   siempre (JavaCC rompe empates por orden de declaracion). */
+TOKEN:
+{
+    < LEXEMA_INVALIDO:
+        ( (~[" ","\t","\r","\n","+","-","*","/","^","=","<",">",":","!","(",")","[","]",",",";"])
+        | (":" (~[" ","\t","\r","\n","+","-","*","/","^","=","<",">",":","!","(",")","[","]",",",";"]))
+        | ("!" (~[" ","\t","\r","\n","+","-","*","/","^","=","<",">",":","!","(",")","[","]",",",";"]))
+        )+
+    >
+  | < OP_INCOMPLETO: [":", "!"] >
+}
+
+/* =========================================================================
+ * GRAMATICA SINTACTICA (Paso 5A, CONGELADA para entrada valida) +
+ * recuperacion sintactica y multiples errores (Paso 5B-2).
+ * Cada produccion corresponde 1:1 a un metodo de parser.py; VarFisica() es
+ * la unica factorizacion nueva (parser.py la inlinea en dos lugares con
+ * logica identica: parse_lugar() y _consumir_var_fisica() para Params()).
+ *
+ * Cambio de arquitectura respecto a 5B-1: NINGUNA produccion lanza
+ * excepcion para un error previsto del lenguaje. Cada una retorna null
+ * (Java) donde Python retorna None, y llama registrarError(mensaje) donde
+ * Python llama _error_actual(mensaje) -- ambas cosas por separado, nunca
+ * mezcladas. sincronizar() SOLO se llama donde parser.py realmente la
+ * llama: dentro de Sentencia() (3 puntos) y en el bucle de Programa()
+ * (Inicio repetido). Ninguna otra produccion sincroniza.
+ * ========================================================================= */
+
+/* Programa(): equivalente a parse(). GRUPO 6 (Paso 5C): [<INICIO>] y
+   [<FIN>] vuelven a ser matches BNF opcionales reales -- JavaCC decide
+   por lookahead de 1 token si el programa empieza/termina con esas
+   palabras. El bucle principal, "Inicio" repetido, "Fin" condicional a
+   tieneInicio, y los tokens sobrantes despues de "Fin" quedan en Java:
+   es logica imperativa que refleja fielmente parse() en Python, no una
+   eleccion sintactica simple -- hibrido legitimo (ver auditoria del Paso
+   5C). linea/columna del NodoPrograma SIEMPRE (1,1), con o sin errores. */
+NodoPrograma Programa():
+{
+    List<NodoAST> sentencias = new ArrayList<NodoAST>();
+    NodoAST sentencia;
+    boolean tieneInicio = false;
+    boolean finEncontrado = false;
+}
+{
+    (
+        <INICIO> { tieneInicio = true; }
+    )?
+    {
+        while (getToken(1).kind != FISIOParserConstants.EOF)
+        {
+            if (getToken(1).kind == FISIOParserConstants.FIN)
+            {
+                break;
+            }
+            if (getToken(1).kind == FISIOParserConstants.INICIO)
+            {
+                registrarError("Token 'Inicio' inesperado dentro del programa");
+                sincronizar();
+                continue;
+            }
+            sentencia = Sentencia();
+            if (sentencia != null)
+            {
+                sentencias.add(sentencia);
+            }
+        }
+    }
+    (
+        <FIN> { finEncontrado = true; }
+    )?
+    {
+        if (!finEncontrado && tieneInicio)
+        {
+            registrarError("Se esperaba 'Fin' para cerrar el programa");
+        }
+        if (getToken(1).kind != FISIOParserConstants.EOF)
+        {
+            registrarError("No se permiten tokens despues de 'Fin'");
+            sincronizarHastaEof();
+        }
+    }
+    <EOF>
+    { return new NodoPrograma(1, 1, sentencias); }
+}
+
+/* Sentencia(): equivalente EXACTO a parse_sentencia(), incluyendo el
+   detalle critico: si falta el ';' final, se registra el error y se
+   sincroniza, pero el nodo YA construido se retorna de todas formas (no
+   se descarta) -- ver "return resultado" final, fuera del if. */
+NodoAST Sentencia():
+{
+    NodoAST resultado = null;
+    int k;
+}
+{
+    {
+        if (getToken(1).kind == FISIOParserConstants.PUNTO_Y_COMA)
+        {
+            registrarError("Sentencia vacia");
+            getNextToken();
+            return null;
+        }
+
+        if (getToken(1).kind == FISIOParserConstants.FIN || getToken(1).kind == FISIOParserConstants.EOF)
+        {
+            return null;
+        }
+
+        k = getToken(1).kind;
+        if (!(esInicioLugar(k) || esCmdMovimiento(k) || esCmdFuncion(k) || esCalculo(k)))
+        {
+            registrarError("Se esperaba asignacion, comando o calculo");
+            sincronizar();
+            return null;
+        }
+    }
+    (
+        resultado = Asignacion()
+      | resultado = CmdMovimiento()
+      | resultado = CmdFuncion()
+      | resultado = Calculo()
+    )
+    {
+        if (resultado == null)
+        {
+            sincronizar();
+            return null;
+        }
+        if (!coincidirToken(FISIOParserConstants.PUNTO_Y_COMA))
+        {
+            registrarError("Se esperaba ';' al final de la sentencia");
+            sincronizar();
+        }
+        return resultado;
+    }
+}
+
+/* Asignacion(): equivalente a parse_asignacion(). GRUPO 4 (Paso 5C):
+   Lugar()/Expresion() vuelven a ser llamadas BNF normales; el chequeo de
+   ':=' sigue en Java porque tiene mensaje propio ("Se esperaba ':='
+   despues del lugar de asignacion") y debe poder registrar+retornar null
+   sin lanzar ParseException. */
+NodoAsignacion Asignacion():
+{
+    NodoAST lugar;
+    NodoAST expresion;
+}
+{
+    lugar = Lugar()
+    {
+        if (lugar == null)
+        {
+            return null;
+        }
+        if (!coincidirToken(FISIOParserConstants.ASIGNACION))
+        {
+            registrarError("Se esperaba ':=' despues del lugar de asignacion");
+            return null;
+        }
+    }
+    expresion = Expresion()
+    {
+        if (expresion == null)
+        {
+            return null;
+        }
+        return new NodoAsignacion(lugar.linea(), lugar.columna(), lugar, expresion);
+    }
+}
+
+/* CmdMovimiento(): equivalente a parse_cmd_movimiento(). GRUPO 1 (Paso 5C):
+   la eleccion de palabra reservada vuelve a BNF real -- Sentencia() ya
+   verifico que el token actual es una de las 4, asi que esta eleccion
+   siempre matchea, igual que en el Paso 5A (0 warnings). Los chequeos de
+   '(' y ')' quedan en Java porque tienen mensaje de error propio y deben
+   poder registrar+retornar null sin lanzar ParseException. */
+NodoComando CmdMovimiento():
+{
+    Token nombre;
+    List<NodoAST> parametros;
+}
+{
+    ( nombre=<MRU> | nombre=<MRUA> | nombre=<CAIDA> | nombre=<PARABOLICO> )
+    {
+        if (!coincidirToken(FISIOParserConstants.PARENTESIS_ABRE))
+        {
+            registrarError("Se esperaba '(' despues del comando de movimiento");
+            return null;
+        }
+    }
+    parametros = Params()
+    {
+        if (!coincidirToken(FISIOParserConstants.PARENTESIS_CIERRA))
+        {
+            registrarError("Se esperaba ')' despues de los parametros");
+            return null;
+        }
+        TokenFisio nombreFisio = MapeoTokens.crear(nombre);
+        return new NodoComando(nombreFisio.linea(), nombreFisio.columna(), nombreFisio, parametros);
+    }
+}
+
+/* CmdFuncion(): equivalente a parse_cmd_funcion(). GRUPO 1 (Paso 5C). */
+NodoComando CmdFuncion():
+{
+    Token nombre;
+    NodoAST argumento;
+}
+{
+    ( nombre=<DESPEJAR> | nombre=<GRAFICAR> | nombre=<SIMULAR> )
+    {
+        if (!coincidirToken(FISIOParserConstants.PARENTESIS_ABRE))
+        {
+            registrarError("Se esperaba '(' despues del comando");
+            return null;
+        }
+    }
+    argumento = Lugar()
+    {
+        if (argumento == null)
+        {
+            return null;
+        }
+        if (!coincidirToken(FISIOParserConstants.PARENTESIS_CIERRA))
+        {
+            registrarError("Se esperaba ')' despues del argumento");
+            return null;
+        }
+        TokenFisio nombreFisio = MapeoTokens.crear(nombre);
+        List<NodoAST> argumentos = new ArrayList<NodoAST>();
+        argumentos.add(argumento);
+        return new NodoComando(nombreFisio.linea(), nombreFisio.columna(), nombreFisio, argumentos);
+    }
+}
+
+/* Calculo(): equivalente a parse_calculo(). GRUPO 1 (Paso 5C). */
+NodoCalculo Calculo():
+{
+    Token nombre;
+    NodoAST expresion;
+}
+{
+    ( nombre=<RAIZ> | nombre=<SENO> | nombre=<COSENO> | nombre=<MAGNITUD> )
+    {
+        if (!coincidirToken(FISIOParserConstants.PARENTESIS_ABRE))
+        {
+            registrarError("Se esperaba '(' despues del calculo");
+            return null;
+        }
+    }
+    expresion = Expresion()
+    {
+        if (expresion == null)
+        {
+            return null;
+        }
+        if (!coincidirToken(FISIOParserConstants.PARENTESIS_CIERRA))
+        {
+            registrarError("Se esperaba ')' despues de la expresion");
+            return null;
+        }
+        TokenFisio nombreFisio = MapeoTokens.crear(nombre);
+        return new NodoCalculo(nombreFisio.linea(), nombreFisio.columna(), nombreFisio, expresion);
+    }
+}
+
+/* Expresion(): equivalente a parse_expresion(). GRUPO 3 (Paso 5C): vuelve
+   a ser BNF real -- ExpAritmetica() [OpRelacional ExpAritmetica()] -- con
+   el mismo `(...)?` nativo que ya se uso en 5A (0 warnings). El
+   OpRelacional NO tiene mensaje propio si esta ausente (es la rama
+   normal), por eso no necesita chequeo previo en Java. */
+NodoAST Expresion():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token operador;
+}
+{
+    izquierda = ExpAritmetica()
+    {
+        if (izquierda == null)
+        {
+            return null;
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        ( operador=<IGUALDAD> | operador=<MENOR> | operador=<MAYOR>
+        | operador=<MENOR_IGUAL> | operador=<MAYOR_IGUAL> | operador=<DISTINTO> )
+        derecha = ExpAritmetica()
+        {
+            if (derecha == null)
+            {
+                return null;
+            }
+            TokenFisio operadorFisio = MapeoTokens.crear(operador);
+            return new NodoOperacionRelacional(
+                operadorFisio.linea(), operadorFisio.columna(), operadorFisio, izquierda, derecha);
+        }
+    )?
+    { return izquierda; }
+}
+
+/* ExpAritmetica(), Termino(), Exponencial(): GRUPO 3 (Paso 5C) -- vuelven
+   a ser BNF real: Termino (('+'|'-') Termino)* / Exponencial (('*'|'/')
+   Exponencial)* / Factor ('^' Exponencial)?. La accion Java en cada
+   iteracion solo detecta null (propagacion, sin mensaje propio -- el
+   error ya se registro mas abajo, en Factor()) y construye NodoOperacion.
+   Asociatividad izquierda de +-*'/ via `(...)*` que reasigna "izquierda";
+   asociatividad derecha de '^' via la recursion Exponencial() en el lado
+   derecho (no Factor()) -- sin cambios de precedencia/asociatividad.
+
+   LOOKAHEAD(1) explicito en las 4 repeticiones/opcionales de esta
+   jerarquia (aqui y en Expresion arriba): JavaCC emitia "Choice conflict"
+   en las 4 -- el disparador es la accion con "return null;" colocada
+   INMEDIATAMENTE ANTES de cada "(...)*"/"(...)?" (necesaria para la
+   propagacion de null); en el Paso 5A, las mismas formas BNF sin esa
+   accion previa compilaban con 0 warnings. La decision de continuar la
+   repeticion solo necesita 1 token (el operador) -- LOOKAHEAD(1) es
+   exactamente ese mismo comportamiento, solo silencia el analisis
+   conservador de JavaCC sobre el FOLLOW-set tras un return anticipado;
+   no cambia ninguna decision en tiempo de ejecucion. */
+NodoAST ExpAritmetica():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token operador;
+}
+{
+    izquierda = Termino()
+    {
+        if (izquierda == null)
+        {
+            return null;
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        ( operador=<SUMA> | operador=<RESTA> )
+        derecha = Termino()
+        {
+            if (derecha == null)
+            {
+                return null;
+            }
+            TokenFisio operadorFisio = MapeoTokens.crear(operador);
+            izquierda = new NodoOperacion(
+                operadorFisio.linea(), operadorFisio.columna(), operadorFisio, izquierda, derecha);
+        }
+    )*
+    { return izquierda; }
+}
+
+NodoAST Termino():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token operador;
+}
+{
+    izquierda = Exponencial()
+    {
+        if (izquierda == null)
+        {
+            return null;
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        ( operador=<MULTIPLICACION> | operador=<DIVISION> )
+        derecha = Exponencial()
+        {
+            if (derecha == null)
+            {
+                return null;
+            }
+            TokenFisio operadorFisio = MapeoTokens.crear(operador);
+            izquierda = new NodoOperacion(
+                operadorFisio.linea(), operadorFisio.columna(), operadorFisio, izquierda, derecha);
+        }
+    )*
+    { return izquierda; }
+}
+
+NodoAST Exponencial():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token operador;
+}
+{
+    izquierda = Factor()
+    {
+        if (izquierda == null)
+        {
+            return null;
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        operador=<POTENCIA>
+        derecha = Exponencial()
+        {
+            if (derecha == null)
+            {
+                return null;
+            }
+            TokenFisio operadorFisio = MapeoTokens.crear(operador);
+            return new NodoOperacion(
+                operadorFisio.linea(), operadorFisio.columna(), operadorFisio, izquierda, derecha);
+        }
+    )?
+    { return izquierda; }
+}
+
+/* Factor(): equivalente a parse_factor(). GRUPO 2 (Paso 5C): el chequeo
+   previo reproduce el "else" final de parse_factor (unico mensaje propio
+   de esta produccion); la eleccion de las 4 alternativas vuelve a ser BNF
+   real -- igual que en 5A (0 warnings), garantizada por el chequeo previo. */
+NodoAST Factor():
+{
+    Token numero;
+    Token apertura;
+    NodoAST resultado;
+    int k;
+}
+{
+    {
+        k = getToken(1).kind;
+        if (!(k == FISIOParserConstants.NUM || esInicioLugar(k)
+                || k == FISIOParserConstants.PARENTESIS_ABRE || esCalculo(k)))
+        {
+            registrarError("Se esperaba NUM, ID, variable fisica, '(' o calculo");
+            return null;
+        }
+    }
+    (
+        numero=<NUM>
+        {
+            TokenFisio numeroFisio = MapeoTokens.crear(numero);
+            return new NodoNumero(numeroFisio.linea(), numeroFisio.columna(), numeroFisio);
+        }
+      |
+        resultado = Lugar()
+        { return resultado; }
+      |
+        apertura=<PARENTESIS_ABRE>
+        resultado = Expresion()
+        {
+            if (resultado == null)
+            {
+                return null;
+            }
+            if (!coincidirToken(FISIOParserConstants.PARENTESIS_CIERRA))
+            {
+                registrarError("Se esperaba ')' para cerrar la agrupacion");
+                return null;
+            }
+            TokenFisio aperturaFisio = MapeoTokens.crear(apertura);
+            return new NodoAgrupacion(aperturaFisio.linea(), aperturaFisio.columna(), resultado);
+        }
+      |
+        resultado = Calculo()
+        { return resultado; }
+    )
+}
+
+/* Lugar(): equivalente a parse_lugar(). GRUPO 2 (Paso 5C): el chequeo
+   previo reproduce el "else" final de parse_lugar; el dispatch ID-vs-
+   VarFisica y la forma opcional "['[' NUM ']']" vuelven a BNF real. Los
+   chequeos internos (NUM esperado, ']' esperado) siguen en Java porque
+   tienen mensaje propio. El indice de NodoAccesoArreglo sigue siendo
+   Token/TokenFisio crudo, no NodoNumero (igual que Python). */
+NodoAST Lugar():
+{
+    Token identificador;
+    Token indice;
+    Token variable;
+    int k;
+}
+{
+    {
+        k = getToken(1).kind;
+        if (!esInicioLugar(k))
+        {
+            registrarError("Se esperaba un lugar: ID, acceso de arreglo o variable fisica");
+            return null;
+        }
+    }
+    (
+        identificador=<ID>
+        (
+            <CORCHETE_ABRE>
+            {
+                if (getToken(1).kind != FISIOParserConstants.NUM)
+                {
+                    registrarError("Se esperaba NUM como indice del arreglo");
+                    return null;
+                }
+            }
+            indice=<NUM>
+            {
+                if (!coincidirToken(FISIOParserConstants.CORCHETE_CIERRA))
+                {
+                    registrarError("Se esperaba ']' para cerrar el acceso de arreglo");
+                    return null;
+                }
+                TokenFisio idFisio = MapeoTokens.crear(identificador);
+                TokenFisio indiceFisio = MapeoTokens.crear(indice);
+                return new NodoAccesoArreglo(idFisio.linea(), idFisio.columna(), idFisio, indiceFisio);
+            }
+        )?
+        {
+            TokenFisio idFisio = MapeoTokens.crear(identificador);
+            return new NodoIdentificador(idFisio.linea(), idFisio.columna(), idFisio);
+        }
+      |
+        variable = VarFisica()
+        {
+            TokenFisio varFisio = MapeoTokens.crear(variable);
+            return new NodoVariableFisica(varFisio.linea(), varFisio.columna(), varFisio);
+        }
+    )
+}
+
+/* VarFisica(): GRUPO 1 (Paso 5C) -- eleccion BNF real, igual que en 5A.
+   Solo se llama despues de que Lugar()/Params() ya verificaron -con su
+   PROPIO mensaje- que el token actual es una de las 7 variables fisicas,
+   asi que esta eleccion siempre matchea (igual que _consumir_var_fisica,
+   donde el mensaje lo registra el llamador, no esta funcion). Retorna el
+   Token crudo: Lugar() lo envuelve en NodoVariableFisica, Params() lo usa
+   crudo como NodoParametro.variable. */
+Token VarFisica():
+{
+    Token t;
+}
+{
+    ( t=<GRAVEDAD> | t=<POSICION> | t=<VELOCIDAD> | t=<ACELERACION> | t=<TIEMPO> | t=<ALTURA> | t=<ALCANCE> )
+    { return t; }
+}
+
+/* Params(): equivalente a parse_params(). GRUPO 5 (Paso 5C) -- intento de
+   forma hibrida: "VarFisica ':=' Expresion (',' VarFisica ':=' Expresion)*"
+   como BNF real, con un `break` embebido en la accion para replicar los 2
+   puntos de salida temprana del `while` de Python. Pendiente de validar
+   contra el oraculo 5B-2/Python en la bateria completa; si algo no
+   coincide, se revierte a la version manual (opcion D del audit,
+   explicitamente permitida). NUNCA sincroniza por su cuenta (igual que
+   Python): cada rama de error retorna/rompe con la lista parcial
+   construida hasta el momento. */
+List<NodoAST> Params():
+{
+    List<NodoAST> parametros = new ArrayList<NodoAST>();
+    Token variable;
+    NodoAST expresion;
+}
+{
+    {
+        if (getToken(1).kind == FISIOParserConstants.PARENTESIS_CIERRA)
+        {
+            registrarError("Se esperaba al menos un parametro");
+            return parametros;
+        }
+        if (!esVarFisica(getToken(1).kind))
+        {
+            registrarError("Se esperaba una variable fisica como parametro");
+            return parametros;
+        }
+    }
+    variable = VarFisica()
+    {
+        if (!coincidirToken(FISIOParserConstants.ASIGNACION))
+        {
+            registrarError("Se esperaba ':=' despues de la variable fisica");
+            return parametros;
+        }
+    }
+    expresion = Expresion()
+    {
+        if (expresion == null)
+        {
+            return parametros;
+        }
+        TokenFisio varFisio = MapeoTokens.crear(variable);
+        parametros.add(new NodoParametro(varFisio.linea(), varFisio.columna(), varFisio, expresion));
+    }
+    (
+        LOOKAHEAD(1)
+        <COMA>
+        {
+            if (getToken(1).kind == FISIOParserConstants.PARENTESIS_CIERRA)
+            {
+                registrarError("Se esperaba un parametro despues de ','");
+                break;
+            }
+            if (!esVarFisica(getToken(1).kind))
+            {
+                registrarError("Se esperaba una variable fisica como parametro");
+                break;
+            }
+        }
+        variable = VarFisica()
+        {
+            if (!coincidirToken(FISIOParserConstants.ASIGNACION))
+            {
+                registrarError("Se esperaba ':=' despues de la variable fisica");
+                break;
+            }
+        }
+        expresion = Expresion()
+        {
+            if (expresion == null)
+            {
+                break;
+            }
+            TokenFisio varFisio2 = MapeoTokens.crear(variable);
+            parametros.add(new NodoParametro(varFisio2.linea(), varFisio2.columna(), varFisio2, expresion));
+        }
+    )*
+    { return parametros; }
+}
