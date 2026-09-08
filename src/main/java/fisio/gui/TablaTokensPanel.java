@@ -15,6 +15,7 @@ import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 
 import fisio.token.CategoriaToken;
+import static fisio.token.CategoriaToken.STRING;
 import fisio.token.TokenFisio;
 
 /**
@@ -96,6 +97,7 @@ public final class TablaTokensPanel extends JPanel {
             case SIG -> TemaFisio.COL_SIG;
             case ID -> TemaFisio.COL_ID;
             case NUM -> TemaFisio.COL_NUM;
+            case STRING -> TemaFisio.COL_STRING;
             case ERROR -> TemaFisio.COL_ERROR;
             case EOF -> TemaFisio.FG_MAIN;
         };

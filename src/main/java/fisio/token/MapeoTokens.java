@@ -1,96 +1,97 @@
 package fisio.token;
 
+import fisio.FisioParserConstants; // Importamos las constantes autogeneradas
+import java.util.HashMap;
 import java.util.Map;
 
-import fisio.FISIOParserConstants;
-import fisio.Token;
 
-/**
- * Traduce Token.kind (generado por JavaCC) hacia la categoria y el ID
- * FISIO originales de token_types.py — la capa que evita que cualquier
- * consumidor (GUI futura incluida) dependa de los enteros generados por
- * JavaCC (5, 6, 7...). Solo cubre los 39 tokens "validos" (palabras
- * reservadas, operadores, signos, ID, NUM); LEXEMA_INVALIDO/OP_INCOMPLETO
- * se manejan aparte en fisio.analysis (siempre se convierten en
- * ErrorLexico, nunca en TokenFisio).
- */
-public final class MapeoTokens {
+public class MapeoTokens {
 
-    private record InfoToken(CategoriaToken categoria, String idFisio) {
-    }
+    // Estructura ligera para almacenar la dupla (ej. "PR", "PR_01")
+    public static class InfoToken {
 
-    private static final Map<Integer, InfoToken> TABLA = Map.ofEntries(
-        // Palabras reservadas (PR_01..PR_20) — mismo orden que PALABRAS_RESERVADAS en token_types.py
-        Map.entry(FISIOParserConstants.MRU,         new InfoToken(CategoriaToken.PR, "PR_01")),
-        Map.entry(FISIOParserConstants.MRUA,        new InfoToken(CategoriaToken.PR, "PR_02")),
-        Map.entry(FISIOParserConstants.CAIDA,       new InfoToken(CategoriaToken.PR, "PR_03")),
-        Map.entry(FISIOParserConstants.PARABOLICO,  new InfoToken(CategoriaToken.PR, "PR_04")),
-        Map.entry(FISIOParserConstants.DESPEJAR,    new InfoToken(CategoriaToken.PR, "PR_05")),
-        Map.entry(FISIOParserConstants.GRAFICAR,    new InfoToken(CategoriaToken.PR, "PR_06")),
-        Map.entry(FISIOParserConstants.SIMULAR,     new InfoToken(CategoriaToken.PR, "PR_07")),
-        Map.entry(FISIOParserConstants.RAIZ,        new InfoToken(CategoriaToken.PR, "PR_08")),
-        Map.entry(FISIOParserConstants.SENO,        new InfoToken(CategoriaToken.PR, "PR_09")),
-        Map.entry(FISIOParserConstants.COSENO,      new InfoToken(CategoriaToken.PR, "PR_10")),
-        Map.entry(FISIOParserConstants.MAGNITUD,    new InfoToken(CategoriaToken.PR, "PR_11")),
-        Map.entry(FISIOParserConstants.GRAVEDAD,    new InfoToken(CategoriaToken.PR, "PR_12")),
-        Map.entry(FISIOParserConstants.POSICION,    new InfoToken(CategoriaToken.PR, "PR_13")),
-        Map.entry(FISIOParserConstants.VELOCIDAD,   new InfoToken(CategoriaToken.PR, "PR_14")),
-        Map.entry(FISIOParserConstants.ACELERACION, new InfoToken(CategoriaToken.PR, "PR_15")),
-        Map.entry(FISIOParserConstants.TIEMPO,      new InfoToken(CategoriaToken.PR, "PR_16")),
-        Map.entry(FISIOParserConstants.ALTURA,      new InfoToken(CategoriaToken.PR, "PR_17")),
-        Map.entry(FISIOParserConstants.ALCANCE,     new InfoToken(CategoriaToken.PR, "PR_18")),
-        Map.entry(FISIOParserConstants.INICIO,      new InfoToken(CategoriaToken.PR, "PR_19")),
-        Map.entry(FISIOParserConstants.FIN,         new InfoToken(CategoriaToken.PR, "PR_20")),
+        public final CategoriaToken categoria; // <-- CAMBIO AQUÍ
+        public final String idTok;
 
-        // Operadores matematicos (OPM_01..OPM_05)
-        Map.entry(FISIOParserConstants.SUMA,           new InfoToken(CategoriaToken.OPM, "OPM_01")),
-        Map.entry(FISIOParserConstants.RESTA,          new InfoToken(CategoriaToken.OPM, "OPM_02")),
-        Map.entry(FISIOParserConstants.MULTIPLICACION, new InfoToken(CategoriaToken.OPM, "OPM_03")),
-        Map.entry(FISIOParserConstants.DIVISION,       new InfoToken(CategoriaToken.OPM, "OPM_04")),
-        Map.entry(FISIOParserConstants.POTENCIA,       new InfoToken(CategoriaToken.OPM, "OPM_05")),
-
-        // Operadores relacionales / asignacion (OPR_01..OPR_07)
-        Map.entry(FISIOParserConstants.ASIGNACION,  new InfoToken(CategoriaToken.OPR, "OPR_01")),
-        Map.entry(FISIOParserConstants.IGUALDAD,    new InfoToken(CategoriaToken.OPR, "OPR_02")),
-        Map.entry(FISIOParserConstants.MENOR,       new InfoToken(CategoriaToken.OPR, "OPR_03")),
-        Map.entry(FISIOParserConstants.MAYOR,       new InfoToken(CategoriaToken.OPR, "OPR_04")),
-        Map.entry(FISIOParserConstants.MENOR_IGUAL, new InfoToken(CategoriaToken.OPR, "OPR_05")),
-        Map.entry(FISIOParserConstants.MAYOR_IGUAL, new InfoToken(CategoriaToken.OPR, "OPR_06")),
-        Map.entry(FISIOParserConstants.DISTINTO,    new InfoToken(CategoriaToken.OPR, "OPR_07")),
-
-        // Signos (SIG_01..SIG_07)
-        Map.entry(FISIOParserConstants.PARENTESIS_ABRE,   new InfoToken(CategoriaToken.SIG, "SIG_01")),
-        Map.entry(FISIOParserConstants.PARENTESIS_CIERRA, new InfoToken(CategoriaToken.SIG, "SIG_02")),
-        Map.entry(FISIOParserConstants.CORCHETE_ABRE,     new InfoToken(CategoriaToken.SIG, "SIG_03")),
-        Map.entry(FISIOParserConstants.CORCHETE_CIERRA,   new InfoToken(CategoriaToken.SIG, "SIG_04")),
-        Map.entry(FISIOParserConstants.COMA,              new InfoToken(CategoriaToken.SIG, "SIG_05")),
-        Map.entry(FISIOParserConstants.PUNTO,             new InfoToken(CategoriaToken.SIG, "SIG_06")),
-        Map.entry(FISIOParserConstants.PUNTO_Y_COMA,      new InfoToken(CategoriaToken.SIG, "SIG_07")),
-
-        // Identificador y numero
-        Map.entry(FISIOParserConstants.ID,  new InfoToken(CategoriaToken.ID, "ID")),
-        Map.entry(FISIOParserConstants.NUM, new InfoToken(CategoriaToken.NUM, "NUM"))
-    );
-
-    private MapeoTokens() {
-    }
-
-    public static boolean esTokenValido(int kind) {
-        return TABLA.containsKey(kind);
-    }
-
-    /** Categoria FISIO de un kind valido, o null si no esta en la tabla (LEXEMA_INVALIDO/OP_INCOMPLETO). */
-    public static CategoriaToken categoriaDe(int kind) {
-        InfoToken info = TABLA.get(kind);
-        return info == null ? null : info.categoria();
-    }
-
-    public static TokenFisio crear(Token token) {
-        InfoToken info = TABLA.get(token.kind);
-        if (info == null) {
-            throw new IllegalArgumentException(
-                "MapeoTokens.crear() no aplica a LEXEMA_INVALIDO/OP_INCOMPLETO (kind=" + token.kind + ")");
+        public InfoToken(CategoriaToken categoria, String idTok) {
+            this.categoria = categoria;
+            this.idTok = idTok;
         }
-        return new TokenFisio(token.image, info.categoria(), info.idFisio(), token.beginLine, token.beginColumn);
+    }
+
+    private static final Map<Integer, InfoToken> MAPEO = new HashMap<>();
+
+    static {
+        // Palabras Reservadas (PR)
+        MAPEO.put(FisioParserConstants.FN, new InfoToken(CategoriaToken.PR, "PR_01"));
+        MAPEO.put(FisioParserConstants.LET, new InfoToken(CategoriaToken.PR, "PR_02"));
+        MAPEO.put(FisioParserConstants.MUT, new InfoToken(CategoriaToken.PR, "PR_03"));
+        MAPEO.put(FisioParserConstants.IF, new InfoToken(CategoriaToken.PR, "PR_04"));
+        MAPEO.put(FisioParserConstants.ELSE, new InfoToken(CategoriaToken.PR, "PR_05"));
+        MAPEO.put(FisioParserConstants.WHILE, new InfoToken(CategoriaToken.PR, "PR_06"));
+        MAPEO.put(FisioParserConstants.FOR, new InfoToken(CategoriaToken.PR, "PR_07"));
+        MAPEO.put(FisioParserConstants.IN, new InfoToken(CategoriaToken.PR, "PR_08"));
+        MAPEO.put(FisioParserConstants.LOOP, new InfoToken(CategoriaToken.PR, "PR_09"));
+        MAPEO.put(FisioParserConstants.MATCH, new InfoToken(CategoriaToken.PR, "PR_10"));
+        MAPEO.put(FisioParserConstants.RETURN, new InfoToken(CategoriaToken.PR, "PR_11"));
+        MAPEO.put(FisioParserConstants.STRUCT, new InfoToken(CategoriaToken.PR, "PR_12"));
+        MAPEO.put(FisioParserConstants.ENUM, new InfoToken(CategoriaToken.PR, "PR_13"));
+        MAPEO.put(FisioParserConstants.IMPL, new InfoToken(CategoriaToken.PR, "PR_14"));
+        MAPEO.put(FisioParserConstants.TRAIT, new InfoToken(CategoriaToken.PR, "PR_15"));
+        MAPEO.put(FisioParserConstants.PUB, new InfoToken(CategoriaToken.PR, "PR_16"));
+        MAPEO.put(FisioParserConstants.USE, new InfoToken(CategoriaToken.PR, "PR_17"));
+        MAPEO.put(FisioParserConstants.TRUE, new InfoToken(CategoriaToken.PR, "PR_18"));
+        MAPEO.put(FisioParserConstants.FALSE, new InfoToken(CategoriaToken.PR, "PR_19"));
+        MAPEO.put(FisioParserConstants.TYPE, new InfoToken(CategoriaToken.PR, "PR_20"));
+        MAPEO.put(FisioParserConstants.CONST, new InfoToken(CategoriaToken.PR, "PR_21"));
+        MAPEO.put(FisioParserConstants.STATIC, new InfoToken(CategoriaToken.PR, "PR_22"));
+        MAPEO.put(FisioParserConstants.AS, new InfoToken(CategoriaToken.PR, "PR_23"));
+
+        // Operadores Matemáticos (OPM)
+        MAPEO.put(FisioParserConstants.MAS, new InfoToken(CategoriaToken.OPM, "OPM_01"));
+        MAPEO.put(FisioParserConstants.MENOS, new InfoToken(CategoriaToken.OPM, "OPM_02"));
+        MAPEO.put(FisioParserConstants.MULT, new InfoToken(CategoriaToken.OPM, "OPM_03"));
+        MAPEO.put(FisioParserConstants.DIV, new InfoToken(CategoriaToken.OPM, "OPM_04"));
+        MAPEO.put(FisioParserConstants.MOD, new InfoToken(CategoriaToken.OPM, "OPM_05"));
+
+        // Operadores Relacionales (OPR)
+        MAPEO.put(FisioParserConstants.IGUAL_QUE, new InfoToken(CategoriaToken.OPR, "OPR_01"));
+        MAPEO.put(FisioParserConstants.DIFERENTE, new InfoToken(CategoriaToken.OPR, "OPR_02"));
+        MAPEO.put(FisioParserConstants.MENOR_QUE, new InfoToken(CategoriaToken.OPR, "OPR_03"));
+        MAPEO.put(FisioParserConstants.MAYOR_QUE, new InfoToken(CategoriaToken.OPR, "OPR_04"));
+        MAPEO.put(FisioParserConstants.MENOR_IGUAL, new InfoToken(CategoriaToken.OPR, "OPR_05"));
+        MAPEO.put(FisioParserConstants.MAYOR_IGUAL, new InfoToken(CategoriaToken.OPR, "OPR_06"));
+
+        // Signos (SIG)
+        MAPEO.put(FisioParserConstants.PAREN_IZQ, new InfoToken(CategoriaToken.SIG, "SIG_01"));
+        MAPEO.put(FisioParserConstants.PAREN_DER, new InfoToken(CategoriaToken.SIG, "SIG_02"));
+        MAPEO.put(FisioParserConstants.CORCHETE_IZQ, new InfoToken(CategoriaToken.SIG, "SIG_03"));
+        MAPEO.put(FisioParserConstants.CORCHETE_DER, new InfoToken(CategoriaToken.SIG, "SIG_04"));
+        MAPEO.put(FisioParserConstants.LLAVE_IZQ, new InfoToken(CategoriaToken.SIG, "SIG_05"));
+        MAPEO.put(FisioParserConstants.LLAVE_DER, new InfoToken(CategoriaToken.SIG, "SIG_06"));
+        MAPEO.put(FisioParserConstants.COMA, new InfoToken(CategoriaToken.SIG, "SIG_07"));
+        MAPEO.put(FisioParserConstants.PUNTO, new InfoToken(CategoriaToken.SIG, "SIG_08"));
+        MAPEO.put(FisioParserConstants.PUNTO_COMA, new InfoToken(CategoriaToken.SIG, "SIG_09"));
+        MAPEO.put(FisioParserConstants.DOS_PUNTOS, new InfoToken(CategoriaToken.SIG, "SIG_10"));
+        MAPEO.put(FisioParserConstants.ASIGNACION, new InfoToken(CategoriaToken.SIG, "SIG_11"));
+        MAPEO.put(FisioParserConstants.NEGACION, new InfoToken(CategoriaToken.SIG, "SIG_12"));
+        MAPEO.put(FisioParserConstants.AMPERSAND, new InfoToken(CategoriaToken.SIG, "SIG_13"));
+        MAPEO.put(FisioParserConstants.PIPE, new InfoToken(CategoriaToken.SIG, "SIG_14"));
+        MAPEO.put(FisioParserConstants.FLECHA, new InfoToken(CategoriaToken.SIG, "SIG_16"));
+        MAPEO.put(FisioParserConstants.FLECHA_GRUESA, new InfoToken(CategoriaToken.SIG, "SIG_17"));
+        MAPEO.put(FisioParserConstants.DOBLE_DOS_PUNTOS, new InfoToken(CategoriaToken.SIG, "SIG_18"));
+        MAPEO.put(FisioParserConstants.AND, new InfoToken(CategoriaToken.SIG, "SIG_19"));
+        MAPEO.put(FisioParserConstants.OR, new InfoToken(CategoriaToken.SIG, "SIG_20"));
+
+        // Tipos Dinámicos y Errores
+        MAPEO.put(FisioParserConstants.ID, new InfoToken(CategoriaToken.ID, "ID"));
+        MAPEO.put(FisioParserConstants.NUM, new InfoToken(CategoriaToken.NUM, "NUM"));
+        MAPEO.put(FisioParserConstants.STRING, new InfoToken(CategoriaToken.STRING, "STRING"));
+        MAPEO.put(FisioParserConstants.ERROR, new InfoToken(CategoriaToken.ERROR, "ERROR"));
+    }
+
+    public static InfoToken obtenerInfo(int kind) {
+        // Usamos CategoriaToken.ERROR como respaldo si el token no está mapeado
+        return MAPEO.getOrDefault(kind, new InfoToken(CategoriaToken.ERROR, "DESCONOCIDO"));
     }
 }

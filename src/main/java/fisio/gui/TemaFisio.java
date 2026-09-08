@@ -40,6 +40,7 @@ public final class TemaFisio {
     public static final Color COL_SIG = Color.decode("#89dceb");
     public static final Color COL_ID = Color.decode("#cdd6f4");
     public static final Color COL_NUM = Color.decode("#a6e3a1");
+    public static final Color COL_STRING = Color.decode("#94e2d5");
     public static final Color COL_ERROR = Color.decode("#f38ba8");
 
     static {

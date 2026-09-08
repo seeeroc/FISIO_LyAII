@@ -21,6 +21,7 @@ public enum CategoriaToken {
     SIG,
     ID,
     NUM,
+    STRING,
     ERROR,
     EOF
 }

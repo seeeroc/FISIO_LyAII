@@ -246,6 +246,7 @@ public final class PanelResumen extends JPanel {
             case SIG -> TemaFisio.COL_SIG;
             case ID -> TemaFisio.COL_ID;
             case NUM -> TemaFisio.COL_NUM;
+            case STRING -> TemaFisio.COL_STRING;
             case ERROR -> TemaFisio.COL_ERROR;
             case EOF -> TemaFisio.FG_MAIN;
         };
