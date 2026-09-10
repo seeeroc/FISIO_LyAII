@@ -215,14 +215,12 @@ SKIP : {
    2. COMENTARIOS
    ========================================== */
 SKIP : {
-    // Comentario de línea
     < "//" (~["\n", "\r"])* ("\n" | "\r" | "\r\n")? >
-    // Comentario de bloque
   | < "/*" (~["*"])* "*" (~["/"] (~["*"])* "*")* "/" >
 }
 
 /* ==========================================
-   3. PALABRAS RESERVADAS (PR)
+   3. PALABRAS RESERVADAS (KEYWORDS DE RUST)
    ========================================== */
 TOKEN : {
     < FN: "fn" >
@@ -236,39 +234,28 @@ TOKEN : {
   | < LOOP: "loop" >
   | < MATCH: "match" >
   | < RETURN: "return" >
+  | < BREAK: "break" >
+  | < CONTINUE: "continue" >
   | < STRUCT: "struct" >
   | < ENUM: "enum" >
   | < IMPL: "impl" >
   | < TRAIT: "trait" >
   | < PUB: "pub" >
   | < USE: "use" >
-  | < TRUE: "true" >
-  | < FALSE: "false" >
+  | < MOD_KW: "mod" > 
+  | < AS: "as" >
   | < TYPE: "type" >
   | < CONST: "const" >
   | < STATIC: "static" >
-  | < AS: "as" >
+  | < WHERE: "where" >
+  | < REF: "ref" >
+  | < UNSAFE: "unsafe" >
+  | < TRUE: "true" >
+  | < FALSE: "false" >
 }
 
 /* ==========================================
-   4. OPERADORES MATEMÁTICOS (OPM) Y RELACIONALES (OPR)
-   ========================================== */
-TOKEN : {
-    < MAS: "+" >
-  | < MENOS: "-" >
-  | < MULT: "*" >
-  | < DIV: "/" >
-  | < MOD: "%" >
-  | < IGUAL_QUE: "==" >
-  | < DIFERENTE: "!=" >
-  | < MENOR_QUE: "<" >
-  | < MAYOR_QUE: ">" >
-  | < MENOR_IGUAL: "<=" >
-  | < MAYOR_IGUAL: ">=" >
-}
-
-/* ==========================================
-   5. SIGNOS (SIG)
+   4. SÍMBOLOS, PUNTUACIÓN Y OPERADORES DE RUST
    ========================================== */
 TOKEN : {
     < PAREN_IZQ: "(" >
@@ -277,41 +264,52 @@ TOKEN : {
   | < CORCHETE_DER: "]" >
   | < LLAVE_IZQ: "{" >
   | < LLAVE_DER: "}" >
-  | < COMA: "," >
-  | < PUNTO: "." >
-  | < PUNTO_COMA: ";" >
-  | < DOS_PUNTOS: ":" >
-  | < ASIGNACION: "=" >
-  | < NEGACION: "!" >
-  | < AMPERSAND: "&" >
-  | < PIPE: "|" >
-  | < FLECHA: "->" >
-  | < FLECHA_GRUESA: "=>" >
-  | < DOBLE_DOS_PUNTOS: "::" >
-  | < AND: "&&" >
-  | < OR: "||" >
-}
-
-/* ==========================================
-   5bis. OPERADORES COMPUESTOS Y RANGO
-   (agregado en la revision general Rust-like; categoria SIG en
-   MapeoTokens, IDs SIG_21..SIG_26 -- ver seccion 21 del pedido: "no crear
-   categorias nuevas solo por pureza", "agregar los nuevos IDs al final de
-   la categoria correspondiente"). El longest-match de JavaCC ya garantiza
-   que "+=" gane sobre "+" seguido de "=", y que ".." gane sobre dos "."
-   sueltos, sin necesidad de estados lexicos ni de reordenar los tokens
-   existentes de las secciones 4 y 5. */
-TOKEN : {
-    < MAS_IGUAL: "+=" >
+  | < SHIFT_IZQ_IGUAL: "<<=" >
+  | < SHIFT_DER_IGUAL: ">>=" >
+  | < MAS_IGUAL: "+=" >
   | < MENOS_IGUAL: "-=" >
   | < MULT_IGUAL: "*=" >
   | < DIV_IGUAL: "/=" >
   | < MOD_IGUAL: "%=" >
-  | < RANGO: ".." >
+  | < AND_BIT_IGUAL: "&=" >
+  | < OR_BIT_IGUAL: "|=" >
+  | < XOR_BIT_IGUAL: "^=" >
+  | < DOBLE_DOS_PUNTOS: "::" >
+  | < RANGO_INCLUSIVO: "..=" >
+  | < RANGO: ".." > //RANGO_EXCLUSIVO
+  | < IGUAL_QUE: "==" >
+  | < DIFERENTE: "!=" >
+  | < MENOR_IGUAL: "<=" >
+  | < MAYOR_IGUAL: ">=" >
+  | < AND: "&&" > 
+  | < OR: "||" >  
+  | < SHIFT_IZQ: "<<" >
+  | < SHIFT_DER: ">>" >
+  | < FLECHA_GRUESA: "=>" >
+  | < FLECHA: "->" >
+  | < ASIGNACION: "=" >
+  | < MENOR_QUE: "<" >
+  | < MAYOR_QUE: ">" >
+  | < MAS: "+" >
+  | < MENOS: "-" >
+  | < MULT: "*" >
+  | < DIV: "/" >
+  | < MOD: "%" >
+  | < NEGACION: "!" >
+  | < AMPERSAND: "&" >
+  | < PIPE: "|" >
+  | < CARET: "^" >
+  | < DOS_PUNTOS: ":" >
+  | < PUNTO_COMA: ";" >
+  | < COMA: "," >
+  | < PUNTO: "." >
+  | < ARROBA: "@" >
+  | < HASH: "#" >
+  | < INTERROGACION: "?" >
 }
 
 /* ==========================================
-   6. EXPRESIONES COMPLEJAS (ID, NUM, STRING)
+   5. EXPRESIONES COMPLEJAS (ID, NUM, STRING)
    ========================================== */
 TOKEN : {
     < ID: ["a"-"z", "A"-"Z", "_"] ( ["a"-"z", "A"-"Z", "_", "0"-"9"] )* >
@@ -320,9 +318,8 @@ TOKEN : {
 }
 
 /* ==========================================
-   7. MANEJO DE ERRORES LÉXICOS
+   6. MANEJO DE ERRORES LÉXICOS
    ========================================== */
-// Cualquier carácter que no coincida con los tokens anteriores caerá aquí
 TOKEN : {
     < ERROR: ~[] >
 }
