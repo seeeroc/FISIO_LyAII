@@ -7,15 +7,28 @@ import fisio.ast.NodoAST;
 import fisio.ast.NodoAccesoArreglo;
 import fisio.ast.NodoAgrupacion;
 import fisio.ast.NodoAsignacion;
+import fisio.ast.NodoBloque;
 import fisio.ast.NodoCalculo;
 import fisio.ast.NodoComando;
+import fisio.ast.NodoDeclaracion;
+import fisio.ast.NodoFor;
+import fisio.ast.NodoFuncion;
 import fisio.ast.NodoIdentificador;
+import fisio.ast.NodoIf;
+import fisio.ast.NodoInvocacionMacro;
+import fisio.ast.NodoLlamadaFuncion;
+import fisio.ast.NodoLoop;
 import fisio.ast.NodoNumero;
 import fisio.ast.NodoOperacion;
 import fisio.ast.NodoOperacionRelacional;
+import fisio.ast.NodoOperacionUnaria;
 import fisio.ast.NodoParametro;
+import fisio.ast.NodoParametroFuncion;
 import fisio.ast.NodoPrograma;
+import fisio.ast.NodoRango;
+import fisio.ast.NodoReturn;
 import fisio.ast.NodoVariableFisica;
+import fisio.ast.NodoWhile;
 
 /**
  * Traduccion directa de PanelSintactico._formatear_ast() (gui.py) a Java.
@@ -31,9 +44,12 @@ import fisio.ast.NodoVariableFisica;
  * el modelo AST (records congelados) para simular esa reflexion generica
  * ni para agregar un metodo visitor. En su lugar, esta clase hace un
  * despacho explicito por tipo (instanceof) que produce, para cada uno de
- * los 12 tipos de nodo reales, EXACTAMENTE la misma salida que produciria
- * el algoritmo generico de Python sobre ese tipo -- verificado campo por
- * campo contra los 12 records de fisio.ast.
+ * los tipos de nodo reales, EXACTAMENTE la misma salida que produciria
+ * el algoritmo generico de Python sobre ese tipo (para los 12 records
+ * originales de fisio.ast) o una salida analoga y consistente con ese
+ * mismo criterio (para los nodos agregados en Fase 2 y en la revision
+ * general Rust-like: NodoFuncion..NodoOperacionUnaria y
+ * NodoRango/NodoLlamadaFuncion/NodoInvocacionMacro/NodoParametroFuncion).
  */
 public final class FormateadorAst {
 
@@ -62,6 +78,10 @@ public final class FormateadorAst {
             hijosLista = n.sentencias();
             etiquetaLista = "sentencias";
         } else if (nodo instanceof NodoAsignacion n) {
+            // Revision general Rust-like: n.operador() es "=" para la
+            // asignacion simple o "+=", "-=", "*=", "/=", "%=" para las
+            // compuestas (campo agregado; antes no existia).
+            detalles.add("operador='" + n.operador().lexema() + "'");
             etiquetasUnicas.add("lugar");
             hijosUnicos.add(n.lugar());
             etiquetasUnicas.add("expresion");
@@ -102,6 +122,80 @@ public final class FormateadorAst {
             detalles.add("indice='" + n.indice().lexema() + "'");
         } else if (nodo instanceof NodoVariableFisica n) {
             detalles.add("token='" + n.token().lexema() + "'");
+        } else if (nodo instanceof NodoFuncion n) {
+            detalles.add("nombre='" + n.nombre().lexema() + "'");
+            // Revision general Rust-like: tipoRetorno (opcional, "-> tipo")
+            // y parametros (antes se descartaban; ahora viven en el AST).
+            if (n.tipoRetorno() != null) {
+                detalles.add("tipoRetorno='" + n.tipoRetorno().lexema() + "'");
+            }
+            if (!n.parametros().isEmpty()) {
+                hijosLista = new ArrayList<>(n.parametros());
+                etiquetaLista = "parametros";
+            }
+            etiquetasUnicas.add("cuerpo");
+            hijosUnicos.add(n.cuerpo());
+        } else if (nodo instanceof NodoParametroFuncion n) {
+            detalles.add("nombre='" + n.nombre().lexema() + "'");
+            detalles.add("tipo='" + n.tipo().lexema() + "'");
+        } else if (nodo instanceof NodoBloque n) {
+            hijosLista = n.sentencias();
+            etiquetaLista = "sentencias";
+            // Revision general Rust-like: expresion final sin ';' (estilo
+            // "fn f() -> i32 { a * b }"); null si el bloque no termina asi.
+            if (n.expresionFinal() != null) {
+                etiquetasUnicas.add("expresionFinal");
+                hijosUnicos.add(n.expresionFinal());
+            }
+        } else if (nodo instanceof NodoRango n) {
+            etiquetasUnicas.add("inicio");
+            hijosUnicos.add(n.inicio());
+            etiquetasUnicas.add("fin");
+            hijosUnicos.add(n.fin());
+        } else if (nodo instanceof NodoLlamadaFuncion n) {
+            detalles.add("nombre='" + n.nombre().lexema() + "'");
+            hijosLista = n.argumentos();
+            etiquetaLista = "argumentos";
+        } else if (nodo instanceof NodoInvocacionMacro n) {
+            detalles.add("nombre='" + n.nombre().lexema() + "'");
+            hijosLista = n.argumentos();
+            etiquetaLista = "argumentos";
+        } else if (nodo instanceof NodoDeclaracion n) {
+            detalles.add("identificador='" + n.identificador().lexema() + "'");
+            detalles.add("mutable=" + n.mutable());
+            if (n.tipo() != null) {
+                detalles.add("tipo='" + n.tipo().lexema() + "'");
+            }
+            etiquetasUnicas.add("expresion");
+            hijosUnicos.add(n.expresion());
+        } else if (nodo instanceof NodoIf n) {
+            etiquetasUnicas.add("condicion");
+            hijosUnicos.add(n.condicion());
+            etiquetasUnicas.add("cuerpoIf");
+            hijosUnicos.add(n.cuerpoIf());
+            etiquetasUnicas.add("cuerpoElse");
+            hijosUnicos.add(n.cuerpoElse());
+        } else if (nodo instanceof NodoWhile n) {
+            etiquetasUnicas.add("condicion");
+            hijosUnicos.add(n.condicion());
+            etiquetasUnicas.add("cuerpo");
+            hijosUnicos.add(n.cuerpo());
+        } else if (nodo instanceof NodoFor n) {
+            detalles.add("variable='" + n.variable().lexema() + "'");
+            etiquetasUnicas.add("iterable");
+            hijosUnicos.add(n.iterable());
+            etiquetasUnicas.add("cuerpo");
+            hijosUnicos.add(n.cuerpo());
+        } else if (nodo instanceof NodoLoop n) {
+            etiquetasUnicas.add("cuerpo");
+            hijosUnicos.add(n.cuerpo());
+        } else if (nodo instanceof NodoReturn n) {
+            etiquetasUnicas.add("expresion");
+            hijosUnicos.add(n.expresion());
+        } else if (nodo instanceof NodoOperacionUnaria n) {
+            detalles.add("operador='" + n.operador().lexema() + "'");
+            etiquetasUnicas.add("operando");
+            hijosUnicos.add(n.operando());
         }
 
         StringBuilder encabezado = new StringBuilder(indent).append(nombre);

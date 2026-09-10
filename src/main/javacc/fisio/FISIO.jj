@@ -1,16 +1,202 @@
+options
+{
+    /* Fase 2: el parser acumula estado por instancia (listaErrores) y cada
+       produccion necesita leerlo/mutarlo (registrarError, sincronizar).
+       Con el STATIC=true por defecto de JavaCC, Programa()/Bloque()/etc.
+       se generan como metodos static y no pueden tocar un campo de
+       instancia -no compilarian-. FisioLexerRunner/FisioParserRunner ya
+       usan "new FisioParser(reader)" + metodos de instancia (parser.Programa(),
+       parser.getNextToken()), asi que este cambio no requiere tocarlos.
+       Mismo enfoque que el proyecto FISIO-JavaCC anterior. */
+    STATIC = false;
+}
+
 PARSER_BEGIN(FisioParser)
 package fisio;
 
 import java.util.ArrayList;
 import java.util.List;
 import fisio.analysis.ErrorSintactico;
+import fisio.ast.NodoAST;
+import fisio.ast.NodoAgrupacion;
+import fisio.ast.NodoAsignacion;
+import fisio.ast.NodoBloque;
+import fisio.ast.NodoDeclaracion;
+import fisio.ast.NodoFor;
+import fisio.ast.NodoFuncion;
+import fisio.ast.NodoIdentificador;
+import fisio.ast.NodoIf;
+import fisio.ast.NodoInvocacionMacro;
+import fisio.ast.NodoLlamadaFuncion;
+import fisio.ast.NodoLoop;
+import fisio.ast.NodoNumero;
+import fisio.ast.NodoOperacion;
+import fisio.ast.NodoOperacionRelacional;
+import fisio.ast.NodoOperacionUnaria;
+import fisio.ast.NodoParametroFuncion;
 import fisio.ast.NodoPrograma;
+import fisio.ast.NodoRango;
+import fisio.ast.NodoReturn;
+import fisio.ast.NodoWhile;
+import fisio.token.CategoriaToken;
+import fisio.token.MapeoTokens;
+import fisio.token.TokenFisio;
 
 public class FisioParser {
     private List<ErrorSintactico> listaErrores = new ArrayList<>();
 
     public List<ErrorSintactico> errores() {
         return this.listaErrores;
+    }
+
+    /* ── Traduccion Token JavaCC -> TokenFisio (incluye EOF) ──
+       No usa MapeoTokens.crear(Token) porque esa fabrica no existe en este
+       proyecto (fisio.token.MapeoTokens solo expone obtenerInfo(kind));
+       se arma el TokenFisio aqui mismo para no tocar esa clase. */
+    private TokenFisio tokenFisioDe(Token t) {
+        if (t.kind == FisioParserConstants.EOF) {
+            return eofTokenFisio();
+        }
+        MapeoTokens.InfoToken info = MapeoTokens.obtenerInfo(t.kind);
+        return new TokenFisio(t.image, info.categoria, info.idTok, t.beginLine, t.beginColumn);
+    }
+
+    private TokenFisio eofTokenFisio() {
+        Token ultimo = getToken(0);
+        if (ultimo == null || ultimo.image == null || ultimo.kind == FisioParserConstants.EOF) {
+            return new TokenFisio("", CategoriaToken.EOF, "EOF", 1, 1);
+        }
+        return new TokenFisio(
+            "", CategoriaToken.EOF, "EOF", ultimo.beginLine, ultimo.beginColumn + ultimo.image.length());
+    }
+
+    /* Solo registra el error (efecto secundario); cada produccion decide
+       por su cuenta, inmediatamente despues, si aborta (return null) o
+       sigue construyendo con datos parciales -- igual filosofia que la
+       usada en el resto de fisio.analysis para separar ambas cosas. */
+    private void registrarError(String mensaje) {
+        TokenFisio tf = tokenFisioDe(getToken(1));
+        listaErrores.add(new ErrorSintactico(tf, mensaje, tf.linea(), tf.columna()));
+    }
+
+    /* Si el token actual es el esperado lo consume y retorna true; si no,
+       NO consume nada y retorna false (nunca lanza ParseException). */
+    private boolean coincidirToken(int kindEsperado) {
+        if (getToken(1).kind == kindEsperado) {
+            getNextToken();
+            return true;
+        }
+        return false;
+    }
+
+    /* Punto de sincronizacion para sentencias: avanza hasta ';' (lo
+       consume, cierre natural de sentencia), '}' o EOF (ninguno de los
+       dos se consume aqui: los debe ver el nivel que llamo, Bloque()). */
+    private void sincronizar() {
+        while (getToken(1).kind != FisioParserConstants.EOF
+                && getToken(1).kind != FisioParserConstants.PUNTO_COMA
+                && getToken(1).kind != FisioParserConstants.LLAVE_DER) {
+            getNextToken();
+        }
+        if (getToken(1).kind == FisioParserConstants.PUNTO_COMA) {
+            getNextToken();
+        }
+    }
+
+    /* Punto de sincronizacion para el cierre de un bloque: avanza hasta
+       '}' (lo consume) o EOF (no lo consume). */
+    private void sincronizarHastaLlaveDerOFin() {
+        while (getToken(1).kind != FisioParserConstants.EOF
+                && getToken(1).kind != FisioParserConstants.LLAVE_DER) {
+            getNextToken();
+        }
+        if (getToken(1).kind == FisioParserConstants.LLAVE_DER) {
+            getNextToken();
+        }
+    }
+
+    /* Sincronizacion "catastrofica" para un encabezado de fn malformado
+       (identificador o parentesis ausentes): en V1 solo se soporta un
+       programa simple, sin recuperacion fina entre funciones, asi que se
+       consume todo lo que quede. Documentado como limitacion en el reporte. */
+    private void sincronizarHastaEof() {
+        while (getToken(1).kind != FisioParserConstants.EOF) {
+            getNextToken();
+        }
+    }
+
+    /* ── Deteccion de "expresion final de bloque" (revision general
+       Rust-like) ──
+       Version inicial: se probo con LOOKAHEAD sintactico de JavaCC
+       (LOOKAHEAD(Expresion() <LLAVE_DER>)) en Bloque(). Se revirtio: ese
+       mecanismo demostro NO ser confiable en cuanto Expresion() involucra
+       parentesis o llamadas a funcion (p.ej. "!es_par(n)", "(a+b)/2",
+       "x + (1)" como ultima linea de un cuerpo terminaban mal
+       clasificados como sentencia, con error "Se esperaba una
+       declaracion o sentencia") -- JavaCC no logra simular
+       correctamente su propio backtracking sobre una produccion tan
+       recursiva como Expresion() (que ademas se llama a si misma via el
+       parentesis de agrupacion en Primario()). En su lugar, esta
+       deteccion se resuelve con LOOKAHEAD SEMANTICO (LOOKAHEAD({ ... }))
+       sobre estos dos metodos, escritos en Java plano con getToken(n) --
+       sin backtracking de JavaCC, deterministicos y faciles de verificar. */
+    private boolean esInicioDeExpresionFinal() {
+        int k = getToken(1).kind;
+        if (k == FisioParserConstants.NUM || k == FisioParserConstants.STRING
+                || k == FisioParserConstants.TRUE || k == FisioParserConstants.FALSE
+                || k == FisioParserConstants.PAREN_IZQ || k == FisioParserConstants.MENOS
+                || k == FisioParserConstants.NEGACION) {
+            // Ninguno de estos tokens es un inicio valido de Sentencia()
+            // (su guard solo acepta LET/IF/WHILE/FOR/LOOP/RETURN/ID): si
+            // el token actual es uno de ellos, solo puede tratarse de la
+            // expresion final del bloque (o una entrada malformada, que
+            // Expresion()/Bloque() ya reportan con su recuperacion habitual).
+            return true;
+        }
+        if (k == FisioParserConstants.ID) {
+            // Unico caso ambiguo: un ID puede iniciar tanto una sentencia
+            // (asignacion/llamada/macro, siempre terminada en ';') como la
+            // expresion final (terminada en '}', sin ';'). Se resuelve con
+            // un escaneo manual hacia adelante.
+            return esExpresionFinalDesdeId();
+        }
+        return false;
+    }
+
+    /* Escanea desde el token actual (siempre ID) buscando, a profundidad
+       de parentesis 0, el primer ';' (es sentencia) o el primer '}' (es
+       la expresion final que cierra ESTE bloque). Ninguna de las formas
+       de sentencia que empiezan con ID (asignacion/llamada/macro) ni
+       ninguna expresion contienen '{'/'}' propios, asi que no hace falta
+       llevar profundidad de llaves aparte -- si aparece un '{' antes de
+       resolver, se trata como "no es expresion final" (entrada
+       malformada; la deja para que Sentencia() la reporte con su
+       recuperacion habitual, en vez de escanear indefinidamente). */
+    private boolean esExpresionFinalDesdeId() {
+        int profundidadParen = 0;
+        int i = 1;
+        while (true) {
+            Token t = getToken(i);
+            if (t.kind == FisioParserConstants.EOF) {
+                return false;
+            }
+            if (t.kind == FisioParserConstants.PAREN_IZQ) {
+                profundidadParen++;
+            } else if (t.kind == FisioParserConstants.PAREN_DER) {
+                profundidadParen--;
+            } else if (profundidadParen == 0) {
+                if (t.kind == FisioParserConstants.PUNTO_COMA) {
+                    return false;
+                }
+                if (t.kind == FisioParserConstants.LLAVE_DER) {
+                    return true;
+                }
+                if (t.kind == FisioParserConstants.LLAVE_IZQ) {
+                    return false;
+                }
+            }
+            i++;
+        }
     }
 }
 PARSER_END(FisioParser)
@@ -107,6 +293,24 @@ TOKEN : {
 }
 
 /* ==========================================
+   5bis. OPERADORES COMPUESTOS Y RANGO
+   (agregado en la revision general Rust-like; categoria SIG en
+   MapeoTokens, IDs SIG_21..SIG_26 -- ver seccion 21 del pedido: "no crear
+   categorias nuevas solo por pureza", "agregar los nuevos IDs al final de
+   la categoria correspondiente"). El longest-match de JavaCC ya garantiza
+   que "+=" gane sobre "+" seguido de "=", y que ".." gane sobre dos "."
+   sueltos, sin necesidad de estados lexicos ni de reordenar los tokens
+   existentes de las secciones 4 y 5. */
+TOKEN : {
+    < MAS_IGUAL: "+=" >
+  | < MENOS_IGUAL: "-=" >
+  | < MULT_IGUAL: "*=" >
+  | < DIV_IGUAL: "/=" >
+  | < MOD_IGUAL: "%=" >
+  | < RANGO: ".." >
+}
+
+/* ==========================================
    6. EXPRESIONES COMPLEJAS (ID, NUM, STRING)
    ========================================== */
 TOKEN : {
@@ -123,17 +327,1009 @@ TOKEN : {
     < ERROR: ~[] >
 }
 
-/* ==========================================
-   8. REGLAS SINTÁCTICAS (TEMPORAL)
-   ========================================== */
+/* =========================================================================
+   8. GRAMATICA SINTACTICA -- Fase 2: sentencias de control y declaraciones
+   =========================================================================
+   Subconjunto academico estilo Rust. Un programa es una secuencia de
+   funciones ("fn nombre() { ... }"); dentro de cada funcion, sentencias de
+   declaracion (let/let mut, con tipo opcional), asignacion, if/else (con
+   else-if natural por recursion), while, for..in, loop y return, todas con
+   bloques "{ }" que admiten anidamiento sin limite artificial.
 
-NodoPrograma Programa() :
+   Cada produccion que puede fallar sigue el mismo patron: valida el token
+   actual con getToken(1), y si no es el esperado llama registrarError(...)
+   y retorna null (nunca lanza ParseException) -- exactamente igual que el
+   registrarError()/sincronizar() ya declarados arriba en PARSER_BEGIN.
+   sincronizar()/sincronizarHastaLlaveDerOFin() son los puntos de
+   recuperacion: ';', '}' y EOF, que es lo que permite reportar mas de un
+   error por pasada. ========================================================================= */
+
+/* Programa(): secuencia de funciones + EOF. NodoPrograma.linea/columna
+   siempre (1,1) -- no hay "Inicio"/"Fin" en este lenguaje (a diferencia
+   del FISIO de fisica anterior). */
+NodoPrograma Programa():
 {
+    List<NodoAST> funciones = new ArrayList<NodoAST>();
+    NodoAST funcion;
 }
 {
-    ( <ANY_TOKEN_OR_JUST_SKIP: ~[]> )* <EOF>
+    (
+        LOOKAHEAD(1)
+        funcion = Funcion()
+        {
+            if (funcion != null) {
+                funciones.add(funcion);
+            }
+        }
+    )*
     {
-        // Pasamos los argumentos requeridos por el record de tu companero
-        return new NodoPrograma(0, 0, new ArrayList<>()); 
+        if (getToken(1).kind != FisioParserConstants.EOF) {
+            registrarError("Se esperaba 'fn' o fin de archivo");
+            sincronizarHastaEof();
+        }
     }
+    <EOF>
+    { return new NodoPrograma(1, 1, funciones); }
+}
+
+/* Funcion(): "fn" ID "(" [Parametros] ")" ["->" ID] Bloque().
+   Revision general Rust-like: a diferencia de la version anterior, los
+   parametros YA NO se descartan (se preservan como NodoParametroFuncion en
+   la lista de la funcion) y se admite un tipo de retorno opcional
+   ("-> i32/f64/bool/String/..."), guardado tal cual sin validacion
+   semantica -- igual criterio que el tipo opcional de Declaracion().
+   Los errores dentro del encabezado (parametro malformado, coma sin
+   parametro siguiente, tipo de retorno ausente) siguen la MISMA politica
+   "catastrofica" ya documentada abajo: registrarError() + sincronizarHastaEof()
+   + return null, sin recuperacion fina entre funciones (limitacion V1 ya
+   aceptada, no una regresion nueva). */
+NodoAST Funcion():
+{
+    Token nombre;
+    Token tipoRetornoTok = null;
+    List<NodoParametroFuncion> parametros = new ArrayList<NodoParametroFuncion>();
+    NodoParametroFuncion parametro;
+    NodoBloque cuerpo;
+}
+{
+    <FN>
+    {
+        if (getToken(1).kind != FisioParserConstants.ID) {
+            registrarError("Se esperaba identificador despues de 'fn'");
+            sincronizarHastaEof();
+            return null;
+        }
+    }
+    nombre=<ID>
+    {
+        if (!coincidirToken(FisioParserConstants.PAREN_IZQ)) {
+            registrarError("Se esperaba '(' despues del nombre de la funcion");
+            sincronizarHastaEof();
+            return null;
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        parametro = Parametro()
+        {
+            if (parametro == null) {
+                sincronizarHastaEof();
+                return null;
+            }
+            parametros.add(parametro);
+        }
+        (
+            LOOKAHEAD(1)
+            <COMA>
+            {
+                if (getToken(1).kind != FisioParserConstants.ID) {
+                    registrarError("Se esperaba un parametro despues de ','");
+                    sincronizarHastaEof();
+                    return null;
+                }
+            }
+            parametro = Parametro()
+            {
+                if (parametro == null) {
+                    sincronizarHastaEof();
+                    return null;
+                }
+                parametros.add(parametro);
+            }
+        )*
+    )?
+    {
+        if (!coincidirToken(FisioParserConstants.PAREN_DER)) {
+            registrarError("Se esperaba ')' para cerrar los parametros");
+            sincronizarHastaEof();
+            return null;
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        <FLECHA>
+        {
+            if (getToken(1).kind != FisioParserConstants.ID) {
+                registrarError("Se esperaba tipo de retorno despues de '->'");
+                sincronizarHastaEof();
+                return null;
+            }
+        }
+        tipoRetornoTok=<ID>
+    )?
+    cuerpo = Bloque()
+    {
+        TokenFisio nombreFisio = tokenFisioDe(nombre);
+        TokenFisio tipoRetornoFisio = (tipoRetornoTok != null) ? tokenFisioDe(tipoRetornoTok) : null;
+        return new NodoFuncion(
+            nombreFisio.linea(), nombreFisio.columna(), nombreFisio, parametros, tipoRetornoFisio, cuerpo);
+    }
+}
+
+/* Parametro(): ID ":" ID -- nombre y tipo de un parametro de funcion.
+   Antes ("void Parametro()") se consumia sintacticamente y se descartaba;
+   ahora construye NodoParametroFuncion. Solo se invoca desde Funcion() en
+   posiciones donde ya se verifico que el token actual es ID (LOOKAHEAD(1)
+   antes de la primera llamada, chequeo de ID despues de la ',' antes de
+   cada llamada siguiente), asi que <ID> inicial nunca falla en la practica;
+   el resto de la produccion sigue el mismo patron defensivo que
+   Declaracion() (getToken(1).kind, registrarError, return null sin
+   sincronizar aqui mismo -- el llamador decide la recuperacion). */
+NodoParametroFuncion Parametro():
+{
+    Token idTok;
+    Token tipoTok;
+}
+{
+    idTok=<ID>
+    {
+        if (!coincidirToken(FisioParserConstants.DOS_PUNTOS)) {
+            registrarError("Se esperaba ':' despues del nombre del parametro");
+            return null;
+        }
+        if (getToken(1).kind != FisioParserConstants.ID) {
+            registrarError("Se esperaba un tipo despues de ':' en el parametro");
+            return null;
+        }
+    }
+    tipoTok=<ID>
+    {
+        TokenFisio idFisio = tokenFisioDe(idTok);
+        TokenFisio tipoFisio = tokenFisioDe(tipoTok);
+        return new NodoParametroFuncion(idFisio.linea(), idFisio.columna(), idFisio, tipoFisio);
+    }
+}
+
+/* Bloque(): "{" Sentencia()* [ExpresionFinal] "}". Cada Sentencia() invalida
+   (null) se descarta sin romper el bloque -- permite seguir acumulando
+   errores.
+
+   Revision general Rust-like: se admite el estilo de Rust "la ultima
+   expresion del bloque, SIN ';', es el valor del bloque" (p.ej.
+   "fn f() -> i32 { a * b }"). La alternativa nueva usa LOOKAHEAD sintactico
+   completo "Expresion() <LLAVE_DER>" -- solo se toma cuando una expresion
+   completa esta INMEDIATAMENTE seguida de '}'; cualquier sentencia real
+   (que termina en ';', o un "if/while/for/loop" que termina en su propio
+   '}') sigue yendo por la rama Sentencia() de siempre, sin cambios. Esto
+   evita ambiguedad con "ID ..." (asignacion/llamada/macro) sin tocar
+   Sentencia() para nada. */
+NodoBloque Bloque():
+{
+    List<NodoAST> sentencias = new ArrayList<NodoAST>();
+    NodoAST sentencia;
+    NodoAST expresionFinal = null;
+    Token apertura;
+}
+{
+    {
+        if (getToken(1).kind != FisioParserConstants.LLAVE_IZQ) {
+            registrarError("Se esperaba '{' para iniciar el bloque");
+            TokenFisio actual = tokenFisioDe(getToken(1));
+            return new NodoBloque(actual.linea(), actual.columna(), sentencias, null);
+        }
+    }
+    apertura=<LLAVE_IZQ>
+    (
+        // Deteccion de la expresion final vía LOOKAHEAD SEMANTICO (Java
+        // puro: esInicioDeExpresionFinal()), no sintactico -- ver la nota
+        // completa junto a esos metodos en PARSER_BEGIN. Un intento previo
+        // con LOOKAHEAD(Expresion() <LLAVE_DER>) (sintactico) resulto poco
+        // confiable para expresiones con parentesis/llamadas a funcion.
+        LOOKAHEAD({ esInicioDeExpresionFinal() })
+        expresionFinal = Expresion()
+      |
+        LOOKAHEAD(1)
+        sentencia = Sentencia()
+        {
+            if (sentencia != null) {
+                sentencias.add(sentencia);
+            }
+        }
+    )*
+    {
+        if (!coincidirToken(FisioParserConstants.LLAVE_DER)) {
+            registrarError("Se esperaba '}' para cerrar el bloque");
+            sincronizarHastaLlaveDerOFin();
+        }
+        TokenFisio aperturaFisio = tokenFisioDe(apertura);
+        return new NodoBloque(aperturaFisio.linea(), aperturaFisio.columna(), sentencias, expresionFinal);
+    }
+}
+
+/* Sentencia(): valida el primer token y despacha a la produccion real vía
+   una eleccion BNF genuina (JavaCC decide entre las alternativas por su
+   propio token inicial, ya garantizado por el chequeo previo).
+
+   Revision general Rust-like: LET/IF/WHILE/FOR/LOOP/RETURN siguen
+   despachando exactamente igual que antes (sin cambios). Cuando el primer
+   token es ID, antes se asumia SIEMPRE Asignacion() -- eso es justo lo que
+   producia "Se esperaba '=' en la asignacion" para "println!(...)" o
+   "foo();". Ahora se distinguen 3 formas con LOOKAHEAD sintactico MINIMO
+   de 2 tokens (JavaCC/BNF real, no un parser manual en Java):
+     ID "!" ...   -> InvocacionMacroSentencia() (println!(...), etc.)
+     ID "(" ...   -> SentenciaExpresion()       (foo();, foo(1, 2);)
+     cualquier otro caso empezando en ID -> Asignacion() (=, +=, -=, *=, /=, %=)
+   El orden importa: los dos LOOKAHEAD explicitos se prueban antes que la
+   alternativa por defecto (Asignacion(), sin LOOKAHEAD propio, como ya
+   tenia el archivo original). */
+NodoAST Sentencia():
+{
+    NodoAST resultado = null;
+    int k;
+}
+{
+    {
+        k = getToken(1).kind;
+        if (!(k == FisioParserConstants.LET || k == FisioParserConstants.IF
+                || k == FisioParserConstants.WHILE || k == FisioParserConstants.FOR
+                || k == FisioParserConstants.LOOP || k == FisioParserConstants.RETURN
+                || k == FisioParserConstants.ID)) {
+            registrarError("Se esperaba una declaracion o sentencia");
+            sincronizar();
+            return null;
+        }
+    }
+    (
+        resultado = Declaracion()
+      | resultado = SentenciaIf()
+      | resultado = SentenciaWhile()
+      | resultado = SentenciaFor()
+      | resultado = SentenciaLoop()
+      | resultado = SentenciaReturn()
+      | LOOKAHEAD(<ID> <NEGACION>) resultado = InvocacionMacroSentencia()
+      | LOOKAHEAD(<ID> <PAREN_IZQ>) resultado = SentenciaExpresion()
+      | resultado = Asignacion()
+    )
+    { return resultado; }
+}
+
+/* ListaArgumentos(): Expresion() ("," Expresion())* -- lista de argumentos
+   compartida entre llamadas a funcion (Primario(), como expresion) e
+   invocaciones de macro (InvocacionMacroSentencia()). Cada Expresion()
+   invalida (null) se descarta sin romper la lista -- mismo criterio que el
+   resto del archivo (Bloque()/Programa() descartan sentencias/funciones
+   nulas de la misma forma). */
+List<NodoAST> ListaArgumentos():
+{
+    List<NodoAST> argumentos = new ArrayList<NodoAST>();
+    NodoAST primero;
+    NodoAST siguiente;
+}
+{
+    primero = Expresion()
+    {
+        if (primero != null) {
+            argumentos.add(primero);
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        <COMA>
+        siguiente = Expresion()
+        {
+            if (siguiente != null) {
+                argumentos.add(siguiente);
+            }
+        }
+    )*
+    { return argumentos; }
+}
+
+/* InvocacionMacroSentencia(): ID "!" "(" [ListaArgumentos] ")" ";".
+   Reconocimiento sintactico MINIMO de una invocacion de macro estilo
+   "println!(...)": forma general "identificador ! ( [argumentos] ) ;".
+   "println" NO se vuelve palabra reservada -- el lexer lo sigue viendo
+   como ID normal; es esta produccion la que reconoce la secuencia de
+   tokens ID NEGACION PAREN_IZQ ... PAREN_DER PUNTO_COMA y construye
+   NodoInvocacionMacro. Sin sistema real de macros de Rust (sin
+   macro_rules!, sin expansion): solo reconocimiento sintactico + AST. */
+NodoAST InvocacionMacroSentencia():
+{
+    Token nombre;
+    List<NodoAST> argumentos = new ArrayList<NodoAST>();
+}
+{
+    nombre=<ID>
+    <NEGACION>
+    {
+        if (!coincidirToken(FisioParserConstants.PAREN_IZQ)) {
+            registrarError("Se esperaba '(' despues de '!' en la macro");
+            sincronizar();
+            return null;
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        argumentos = ListaArgumentos()
+    )?
+    {
+        if (!coincidirToken(FisioParserConstants.PAREN_DER)) {
+            registrarError("Se esperaba ')' al final de la macro");
+            sincronizar();
+            return null;
+        }
+        if (!coincidirToken(FisioParserConstants.PUNTO_COMA)) {
+            registrarError("Se esperaba ';' al final de la macro");
+            sincronizar();
+        }
+        TokenFisio nombreFisio = tokenFisioDe(nombre);
+        return new NodoInvocacionMacro(nombreFisio.linea(), nombreFisio.columna(), nombreFisio, argumentos);
+    }
+}
+
+/* SentenciaExpresion(): Expresion() ";". En la practica, hoy la unica
+   forma util que llega aqui (ver el LOOKAHEAD(<ID> <PAREN_IZQ>) en
+   Sentencia()) es una llamada a funcion usada como sentencia completa:
+   "foo();", "foo(1, 2);". Reutiliza Expresion()/Primario() (donde vive el
+   reconocimiento de "nombre(args)") en vez de duplicar el parseo de la
+   llamada en una produccion aparte. */
+NodoAST SentenciaExpresion():
+{
+    NodoAST expresion;
+}
+{
+    expresion = Expresion()
+    {
+        if (expresion == null) {
+            sincronizar();
+            return null;
+        }
+        if (!coincidirToken(FisioParserConstants.PUNTO_COMA)) {
+            registrarError("Se esperaba ';' al final de la sentencia");
+            sincronizar();
+        }
+        return expresion;
+    }
+}
+
+/* Declaracion(): "let" ["mut"] ID [":" ID] "=" Expresion() ";".
+   El tipo (i32, f64, ...) NO es palabra reservada en este proyecto, asi
+   que se reutiliza ID tal cual -- sin validacion semantica alguna. */
+NodoAST Declaracion():
+{
+    Token idTok;
+    Token tipoTok = null;
+    boolean mutable = false;
+    NodoAST expresion;
+}
+{
+    <LET>
+    (
+        LOOKAHEAD(1) <MUT> { mutable = true; }
+    )?
+    {
+        if (getToken(1).kind != FisioParserConstants.ID) {
+            registrarError("Se esperaba identificador despues de 'let'");
+            sincronizar();
+            return null;
+        }
+    }
+    idTok=<ID>
+    (
+        LOOKAHEAD(1)
+        <DOS_PUNTOS>
+        {
+            if (getToken(1).kind != FisioParserConstants.ID) {
+                registrarError("Se esperaba un tipo despues de ':'");
+                sincronizar();
+                return null;
+            }
+        }
+        tipoTok=<ID>
+    )?
+    {
+        if (!coincidirToken(FisioParserConstants.ASIGNACION)) {
+            registrarError("Se esperaba '=' en la declaracion");
+            sincronizar();
+            return null;
+        }
+    }
+    expresion = Expresion()
+    {
+        if (expresion == null) {
+            sincronizar();
+            return null;
+        }
+        if (!coincidirToken(FisioParserConstants.PUNTO_COMA)) {
+            registrarError("Se esperaba ';' al final de la declaracion");
+            sincronizar();
+        }
+        TokenFisio idFisio = tokenFisioDe(idTok);
+        TokenFisio tipoFisio = (tipoTok != null) ? tokenFisioDe(tipoTok) : null;
+        return new NodoDeclaracion(idFisio.linea(), idFisio.columna(), idFisio, mutable, tipoFisio, expresion);
+    }
+}
+
+/* Asignacion(): ID ("=" | "+=" | "-=" | "*=" | "/=" | "%=") Expresion() ";".
+   "lugar" se envuelve en NodoIdentificador para reutilizar el campo
+   generico NodoAsignacion.lugar ya existente en el AST heredado.
+
+   Revision general Rust-like: se agregan las 5 asignaciones compuestas
+   ademas de la simple "=" (antes la unica admitida). El mensaje de error
+   "Se esperaba '=' en la asignacion" se conserva TAL CUAL para cuando no
+   aparece NINGUNO de los 6 operadores -- no se reformula, solo se amplia
+   la condicion que lo dispara. El operador realmente encontrado se guarda
+   en NodoAsignacion.operador() (antes ese campo no existia). */
+NodoAST Asignacion():
+{
+    Token idTok;
+    Token operadorTok;
+    NodoAST expresion;
+}
+{
+    idTok=<ID>
+    {
+        int k = getToken(1).kind;
+        if (!(k == FisioParserConstants.ASIGNACION || k == FisioParserConstants.MAS_IGUAL
+                || k == FisioParserConstants.MENOS_IGUAL || k == FisioParserConstants.MULT_IGUAL
+                || k == FisioParserConstants.DIV_IGUAL || k == FisioParserConstants.MOD_IGUAL)) {
+            registrarError("Se esperaba '=' en la asignacion");
+            sincronizar();
+            return null;
+        }
+    }
+    (
+        operadorTok=<ASIGNACION>
+      | operadorTok=<MAS_IGUAL>
+      | operadorTok=<MENOS_IGUAL>
+      | operadorTok=<MULT_IGUAL>
+      | operadorTok=<DIV_IGUAL>
+      | operadorTok=<MOD_IGUAL>
+    )
+    expresion = Expresion()
+    {
+        if (expresion == null) {
+            sincronizar();
+            return null;
+        }
+        if (!coincidirToken(FisioParserConstants.PUNTO_COMA)) {
+            registrarError("Se esperaba ';' al final de la sentencia");
+            sincronizar();
+        }
+        TokenFisio idFisio = tokenFisioDe(idTok);
+        TokenFisio operadorFisio = tokenFisioDe(operadorTok);
+        NodoAST lugar = new NodoIdentificador(idFisio.linea(), idFisio.columna(), idFisio);
+        return new NodoAsignacion(idFisio.linea(), idFisio.columna(), lugar, operadorFisio, expresion);
+    }
+}
+
+/* SentenciaIf(): "if" Expresion() Bloque() ["else" (SentenciaIf() | Bloque())].
+   El "else if" sale gratis por la recursion de la segunda alternativa. */
+NodoAST SentenciaIf():
+{
+    Token ifTok;
+    NodoAST condicion;
+    NodoBloque cuerpo;
+    NodoAST otro = null;
+}
+{
+    ifTok=<IF>
+    condicion = Expresion()
+    {
+        /* Sin registrarError propio aqui: si condicion es null, Primario()
+           ya registro "Se esperaba una expresion" sobre el token exacto
+           que fallo -- agregar un segundo mensaje aqui duplicaria el
+           reporte para un mismo error (mismo criterio de "un mensaje por
+           fallo, sin re-registrar en cada nivel de propagacion" que usa
+           el resto de esta jerarquia de expresiones). */
+        if (condicion == null) {
+            sincronizar();
+            return null;
+        }
+    }
+    cuerpo = Bloque()
+    (
+        LOOKAHEAD(1)
+        <ELSE>
+        {
+            /* Igual razon que en ExpUnaria(): SentenciaIf() y Bloque()
+               tienen FIRST-sets fijos (IF y LLAVE_IZQ); sin este guard,
+               un 'else' seguido de cualquier otra cosa (p.ej. "else 5;")
+               haria que JavaCC lanzara ParseException antes de que
+               ninguna produccion pudiera registrar el error. */
+            if (getToken(1).kind != FisioParserConstants.IF
+                    && getToken(1).kind != FisioParserConstants.LLAVE_IZQ) {
+                registrarError("Se esperaba '{' o 'if' despues de 'else'");
+                sincronizar();
+                return null;
+            }
+        }
+        (
+            LOOKAHEAD(1)
+            otro = SentenciaIf()
+          |
+            otro = Bloque()
+        )
+    )?
+    {
+        TokenFisio ifFisio = tokenFisioDe(ifTok);
+        return new NodoIf(ifFisio.linea(), ifFisio.columna(), condicion, cuerpo, otro);
+    }
+}
+
+/* SentenciaWhile(): "while" Expresion() Bloque(). */
+NodoAST SentenciaWhile():
+{
+    Token whileTok;
+    NodoAST condicion;
+    NodoBloque cuerpo;
+}
+{
+    whileTok=<WHILE>
+    condicion = Expresion()
+    {
+        // Mismo criterio que en SentenciaIf(): sin mensaje propio, Primario()
+        // ya registro el error especifico sobre el token que fallo.
+        if (condicion == null) {
+            sincronizar();
+            return null;
+        }
+    }
+    cuerpo = Bloque()
+    {
+        TokenFisio whileFisio = tokenFisioDe(whileTok);
+        return new NodoWhile(whileFisio.linea(), whileFisio.columna(), condicion, cuerpo);
+    }
+}
+
+/* SentenciaFor(): "for" ID "in" Expresion() Bloque(). Solo reconocimiento
+   sintactico: "iterable" es cualquier expresion, sin iteradores reales. */
+NodoAST SentenciaFor():
+{
+    Token forTok;
+    Token idTok;
+    NodoAST iterable;
+    NodoBloque cuerpo;
+}
+{
+    forTok=<FOR>
+    {
+        if (getToken(1).kind != FisioParserConstants.ID) {
+            registrarError("Se esperaba identificador despues de 'for'");
+            sincronizar();
+            return null;
+        }
+    }
+    idTok=<ID>
+    {
+        if (!coincidirToken(FisioParserConstants.IN)) {
+            registrarError("Se esperaba 'in' en la sentencia 'for'");
+            sincronizar();
+            return null;
+        }
+    }
+    iterable = Expresion()
+    {
+        if (iterable == null) {
+            sincronizar();
+            return null;
+        }
+    }
+    cuerpo = Bloque()
+    {
+        TokenFisio idFisio = tokenFisioDe(idTok);
+        return new NodoFor(idFisio.linea(), idFisio.columna(), idFisio, iterable, cuerpo);
+    }
+}
+
+/* SentenciaLoop(): "loop" Bloque(). Sin semantica (no hay 'break'/'continue'). */
+NodoAST SentenciaLoop():
+{
+    Token loopTok;
+    NodoBloque cuerpo;
+}
+{
+    loopTok=<LOOP>
+    cuerpo = Bloque()
+    {
+        TokenFisio loopFisio = tokenFisioDe(loopTok);
+        return new NodoLoop(loopFisio.linea(), loopFisio.columna(), cuerpo);
+    }
+}
+
+/* SentenciaReturn(): "return" [Expresion()] ";". */
+NodoAST SentenciaReturn():
+{
+    Token returnTok;
+    NodoAST expresion = null;
+}
+{
+    returnTok=<RETURN>
+    (
+        LOOKAHEAD(1)
+        expresion = Expresion()
+    )?
+    {
+        if (!coincidirToken(FisioParserConstants.PUNTO_COMA)) {
+            registrarError("Se esperaba ';' al final de 'return'");
+            sincronizar();
+        }
+        TokenFisio returnFisio = tokenFisioDe(returnTok);
+        return new NodoReturn(returnFisio.linea(), returnFisio.columna(), expresion);
+    }
+}
+
+/* =========================================================================
+   EXPRESIONES -- jerarquia de precedencia (de menor a mayor):
+   ||  &&  ==/!=  </>/<=/>=  +/-  * / %  unario(!,-)  primario
+   Cada nivel reutiliza NodoOperacion (aritmetico/logico binario) o
+   NodoOperacionRelacional (comparacion), ambos ya existentes en el AST
+   heredado -- ningun nivel crea un nodo nuevo. El patron "izquierda==null
+   => return null" (propagacion sin mensaje propio -- el error ya se
+   registro mas abajo, en Primario()) es identico al usado en el proyecto
+   FISIO-JavaCC anterior para su propia jerarquia de expresiones.
+   ========================================================================= */
+
+/* Expresion(): ExpOr() [".." ExpOr()].
+   Revision general Rust-like: ".." se integra como el operador de MENOR
+   precedencia de toda la jerarquia (por debajo incluso de "||"), y NO
+   asociativo (un solo ".." por expresion: "a..b", no "a..b..c") -- de ahi
+   que el envoltorio use "?" y no "*". Esto alcanza para el caso pedido
+   ("for i in 0..10 { ... }", "for i in inicio..fin { ... }") sin tocar
+   ExpOr()..Primario() en absoluto: para cualquier entrada que no contenga
+   un token RANGO, este nivel se reduce exactamente al ExpOr() de siempre
+   (mismo resultado, cero cambio de comportamiento). */
+NodoAST Expresion():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token rangoTok;
+}
+{
+    izquierda = ExpOr()
+    {
+        if (izquierda == null) {
+            return null;
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        rangoTok=<RANGO>
+        derecha = ExpOr()
+        {
+            if (derecha == null) {
+                return null;
+            }
+            TokenFisio rangoFisio = tokenFisioDe(rangoTok);
+            izquierda = new NodoRango(rangoFisio.linea(), rangoFisio.columna(), izquierda, derecha);
+        }
+    )?
+    { return izquierda; }
+}
+
+NodoAST ExpOr():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token operador;
+}
+{
+    izquierda = ExpAnd()
+    {
+        if (izquierda == null) {
+            return null;
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        operador=<OR>
+        derecha = ExpAnd()
+        {
+            if (derecha == null) {
+                return null;
+            }
+            TokenFisio opFisio = tokenFisioDe(operador);
+            izquierda = new NodoOperacion(opFisio.linea(), opFisio.columna(), opFisio, izquierda, derecha);
+        }
+    )*
+    { return izquierda; }
+}
+
+NodoAST ExpAnd():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token operador;
+}
+{
+    izquierda = ExpIgualdad()
+    {
+        if (izquierda == null) {
+            return null;
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        operador=<AND>
+        derecha = ExpIgualdad()
+        {
+            if (derecha == null) {
+                return null;
+            }
+            TokenFisio opFisio = tokenFisioDe(operador);
+            izquierda = new NodoOperacion(opFisio.linea(), opFisio.columna(), opFisio, izquierda, derecha);
+        }
+    )*
+    { return izquierda; }
+}
+
+NodoAST ExpIgualdad():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token operador;
+}
+{
+    izquierda = ExpRelacional()
+    {
+        if (izquierda == null) {
+            return null;
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        ( operador=<IGUAL_QUE> | operador=<DIFERENTE> )
+        derecha = ExpRelacional()
+        {
+            if (derecha == null) {
+                return null;
+            }
+            TokenFisio opFisio = tokenFisioDe(operador);
+            izquierda = new NodoOperacionRelacional(
+                opFisio.linea(), opFisio.columna(), opFisio, izquierda, derecha);
+        }
+    )*
+    { return izquierda; }
+}
+
+NodoAST ExpRelacional():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token operador;
+}
+{
+    izquierda = ExpAditiva()
+    {
+        if (izquierda == null) {
+            return null;
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        ( operador=<MENOR_QUE> | operador=<MAYOR_QUE> | operador=<MENOR_IGUAL> | operador=<MAYOR_IGUAL> )
+        derecha = ExpAditiva()
+        {
+            if (derecha == null) {
+                return null;
+            }
+            TokenFisio opFisio = tokenFisioDe(operador);
+            izquierda = new NodoOperacionRelacional(
+                opFisio.linea(), opFisio.columna(), opFisio, izquierda, derecha);
+        }
+    )*
+    { return izquierda; }
+}
+
+NodoAST ExpAditiva():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token operador;
+}
+{
+    izquierda = ExpMultiplicativa()
+    {
+        if (izquierda == null) {
+            return null;
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        ( operador=<MAS> | operador=<MENOS> )
+        derecha = ExpMultiplicativa()
+        {
+            if (derecha == null) {
+                return null;
+            }
+            TokenFisio opFisio = tokenFisioDe(operador);
+            izquierda = new NodoOperacion(opFisio.linea(), opFisio.columna(), opFisio, izquierda, derecha);
+        }
+    )*
+    { return izquierda; }
+}
+
+NodoAST ExpMultiplicativa():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token operador;
+}
+{
+    izquierda = ExpUnaria()
+    {
+        if (izquierda == null) {
+            return null;
+        }
+    }
+    (
+        LOOKAHEAD(1)
+        ( operador=<MULT> | operador=<DIV> | operador=<MOD> )
+        derecha = ExpUnaria()
+        {
+            if (derecha == null) {
+                return null;
+            }
+            TokenFisio opFisio = tokenFisioDe(operador);
+            izquierda = new NodoOperacion(opFisio.linea(), opFisio.columna(), opFisio, izquierda, derecha);
+        }
+    )*
+    { return izquierda; }
+}
+
+/* ExpUnaria(): ('-'|'!') ExpUnaria() | Primario(). Sintactico, no lexico:
+   el NUM sigue siendo solo digitos (token MENOS + token NUM, nunca un
+   NUM con signo); el parser construye NodoOperacionUnaria. Recursiva a la
+   derecha (permite "--5", "!!x", etc., igual que en Rust).
+
+   El chequeo de "es esto el inicio de una expresion" vive AQUI (no solo
+   dentro de Primario()) porque JavaCC decide la eleccion de abajo por el
+   FIRST-set ESTATICO de cada alternativa (MENOS/NEGACION vs el FIRST de
+   Primario()); si el token actual no esta en ninguno de los dos, JavaCC
+   lanza ParseException ANTES de siquiera llamar a Primario() -- su propio
+   guard interno nunca llega a ejecutarse en ese caso. Este guard previo
+   es el que realmente evita la excepcion (mismo patron que Sentencia()/
+   Primario(): validar con getToken(1) antes de la eleccion BNF real). */
+NodoAST ExpUnaria():
+{
+    Token operador;
+    NodoAST operando;
+    NodoAST resultado;
+    int k;
+}
+{
+    {
+        k = getToken(1).kind;
+        if (!(k == FisioParserConstants.MENOS || k == FisioParserConstants.NEGACION
+                || k == FisioParserConstants.NUM || k == FisioParserConstants.STRING
+                || k == FisioParserConstants.TRUE || k == FisioParserConstants.FALSE
+                || k == FisioParserConstants.ID || k == FisioParserConstants.PAREN_IZQ)) {
+            registrarError("Se esperaba una expresion");
+            return null;
+        }
+    }
+    (
+        ( operador=<MENOS> | operador=<NEGACION> )
+        operando = ExpUnaria()
+        {
+            if (operando == null) {
+                return null;
+            }
+            TokenFisio opFisio = tokenFisioDe(operador);
+            return new NodoOperacionUnaria(opFisio.linea(), opFisio.columna(), opFisio, operando);
+        }
+      |
+        resultado = Primario()
+        { return resultado; }
+    )
+}
+
+/* Primario(): NUM | STRING | TRUE | FALSE | ID ["(" [ListaArgumentos] ")"] | "(" Expresion() ")".
+   El guard de aqui abajo queda como segunda linea de defensa (Primario()
+   solo se llama desde ExpUnaria(), que ya filtro el token, pero se deja
+   por si en el futuro se llama desde otro lugar).
+   Decision de diseno (documentada en el reporte final): STRING/TRUE/FALSE
+   se envuelven en NodoNumero -- igual que NUM -- en vez de crear un nodo
+   "NodoLiteral" nuevo solo para esto; ninguno de los casos de prueba
+   obligatorios de la Fase 2 depende de distinguirlos, y evita un nodo
+   practicamente identico a NodoNumero (mismo shape: linea/columna/token).
+
+   Revision general Rust-like: la rama ID se amplia con un "(" opcional --
+   si un ID esta inmediatamente seguido de "(", se reconoce como llamada a
+   funcion (NodoLlamadaFuncion) en vez de identificador simple; si no, el
+   comportamiento es EXACTAMENTE el de antes (NodoIdentificador). Esto
+   habilita "nombre(args)" en CUALQUIER posicion de expresion (p.ej.
+   "let resultado = multiplicar(contador, 5);"), reutilizando la misma
+   ListaArgumentos() que usa InvocacionMacroSentencia(). */
+NodoAST Primario():
+{
+    Token t;
+    NodoAST resultado;
+    List<NodoAST> argumentos;
+}
+{
+    {
+        int k = getToken(1).kind;
+        if (!(k == FisioParserConstants.NUM || k == FisioParserConstants.STRING
+                || k == FisioParserConstants.TRUE || k == FisioParserConstants.FALSE
+                || k == FisioParserConstants.ID || k == FisioParserConstants.PAREN_IZQ)) {
+            registrarError("Se esperaba una expresion");
+            return null;
+        }
+    }
+    (
+        t=<NUM>
+        {
+            TokenFisio tf = tokenFisioDe(t);
+            return new NodoNumero(tf.linea(), tf.columna(), tf);
+        }
+      |
+        t=<STRING>
+        {
+            TokenFisio tf = tokenFisioDe(t);
+            return new NodoNumero(tf.linea(), tf.columna(), tf);
+        }
+      |
+        t=<TRUE>
+        {
+            TokenFisio tf = tokenFisioDe(t);
+            return new NodoNumero(tf.linea(), tf.columna(), tf);
+        }
+      |
+        t=<FALSE>
+        {
+            TokenFisio tf = tokenFisioDe(t);
+            return new NodoNumero(tf.linea(), tf.columna(), tf);
+        }
+      |
+        t=<ID>
+        (
+            LOOKAHEAD(1)
+            <PAREN_IZQ>
+            {
+                argumentos = new ArrayList<NodoAST>();
+            }
+            (
+                LOOKAHEAD(1)
+                argumentos = ListaArgumentos()
+            )?
+            {
+                if (!coincidirToken(FisioParserConstants.PAREN_DER)) {
+                    registrarError("Se esperaba ')' al final de la llamada");
+                    return null;
+                }
+                TokenFisio tf = tokenFisioDe(t);
+                return new NodoLlamadaFuncion(tf.linea(), tf.columna(), tf, argumentos);
+            }
+          |
+            {
+                TokenFisio tf = tokenFisioDe(t);
+                return new NodoIdentificador(tf.linea(), tf.columna(), tf);
+            }
+        )
+      |
+        t=<PAREN_IZQ>
+        resultado = Expresion()
+        {
+            if (resultado == null) {
+                return null;
+            }
+            if (!coincidirToken(FisioParserConstants.PAREN_DER)) {
+                registrarError("Se esperaba ')' para cerrar la agrupacion");
+                return null;
+            }
+            TokenFisio tf = tokenFisioDe(t);
+            return new NodoAgrupacion(tf.linea(), tf.columna(), resultado);
+        }
+    )
 }

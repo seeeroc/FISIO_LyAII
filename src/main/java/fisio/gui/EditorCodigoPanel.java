@@ -9,6 +9,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
 
 import javax.swing.BorderFactory;
 import javax.swing.JPanel;
@@ -46,6 +47,7 @@ public final class EditorCodigoPanel extends JPanel {
     private final JTextPane texto;
     private final JTextArea numeros;
     private final List<Runnable> listenersCambio = new ArrayList<>();
+    private final List<BiConsumer<Integer, Integer>> listenersCursor = new ArrayList<>();
 
     private final StyledDocument documentoEstilado;
     private final Style estiloBase;
@@ -115,6 +117,43 @@ public final class EditorCodigoPanel extends JPanel {
             public void changedUpdate(DocumentEvent e) {
             }
         });
+
+        // Fase 2: indicador de Línea/Columna del cursor, estilo IDE. Se
+        // apoya en el caret REAL del JTextPane (CaretListener), nunca en
+        // el mouse ni en un calculo manual -- se dispara con clics, flechas,
+        // Home/End, escritura, borrado, Enter, seleccion de texto, y
+        // tambien con cambios programaticos de caret (setCaretPosition,
+        // usado por setCodigo()/limpiar() mas abajo), asi que abrir un
+        // archivo, cargar un ejemplo o limpiar tambien lo actualizan.
+        texto.addCaretListener(e -> notificarCursor());
+    }
+
+    /** Registra un listener de posicion de cursor: (linea, columna), ambos base 1. */
+    public void addCursorListener(BiConsumer<Integer, Integer> listener) {
+        listenersCursor.add(listener);
+    }
+
+    private void notificarCursor() {
+        int[] lineaColumna = calcularLineaColumna(texto.getCaretPosition());
+        for (BiConsumer<Integer, Integer> listener : listenersCursor) {
+            listener.accept(lineaColumna[0], lineaColumna[1]);
+        }
+    }
+
+    /**
+     * Traduce una posicion absoluta del Document a (linea, columna) base 1,
+     * usando el mismo modelo de Element/offsets que offsetDe()/finDeLinea()
+     * ya usan para el resaltado -- consistente con LF y CRLF sin casos
+     * especiales, y con el caret "dot" si hay una seleccion activa (basta
+     * con esa posicion, sin reportar el tamaño de la seleccion).
+     */
+    private int[] calcularLineaColumna(int posicionCaret) {
+        Element raiz = documentoEstilado.getDefaultRootElement();
+        int indiceLinea = raiz.getElementIndex(posicionCaret);
+        Element elementoLinea = raiz.getElement(indiceLinea);
+        int linea = indiceLinea + 1;
+        int columna = posicionCaret - elementoLinea.getStartOffset() + 1;
+        return new int[]{linea, columna};
     }
 
     /**

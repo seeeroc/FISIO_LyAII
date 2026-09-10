@@ -1,2 +1,23 @@
-# Configuración local de NetBeans
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# IntelliJ IDEA
+.idea/
+*.iml
+
+# NetBeans
 nb-configuration.xml
+nbactions.xml
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# Logs
+*.log
+
+# Sistema operativo
+.DS_Store
+Thumbs.db

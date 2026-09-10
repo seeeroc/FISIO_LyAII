@@ -83,6 +83,18 @@ public class MapeoTokens {
         MAPEO.put(FisioParserConstants.AND, new InfoToken(CategoriaToken.SIG, "SIG_19"));
         MAPEO.put(FisioParserConstants.OR, new InfoToken(CategoriaToken.SIG, "SIG_20"));
 
+        // Revision general Rust-like: asignaciones compuestas y rango,
+        // agregados AL FINAL de SIG (SIG_21..SIG_26) para no renumerar
+        // ningun ID existente (SIG_01..SIG_20 sin tocar, hueco SIG_15
+        // preexistente sin rellenar). Misma categoria SIG que "=" (SIG_11)
+        // -- no se crea una categoria nueva solo por estos 6 tokens.
+        MAPEO.put(FisioParserConstants.MAS_IGUAL, new InfoToken(CategoriaToken.SIG, "SIG_21"));
+        MAPEO.put(FisioParserConstants.MENOS_IGUAL, new InfoToken(CategoriaToken.SIG, "SIG_22"));
+        MAPEO.put(FisioParserConstants.MULT_IGUAL, new InfoToken(CategoriaToken.SIG, "SIG_23"));
+        MAPEO.put(FisioParserConstants.DIV_IGUAL, new InfoToken(CategoriaToken.SIG, "SIG_24"));
+        MAPEO.put(FisioParserConstants.MOD_IGUAL, new InfoToken(CategoriaToken.SIG, "SIG_25"));
+        MAPEO.put(FisioParserConstants.RANGO, new InfoToken(CategoriaToken.SIG, "SIG_26"));
+
         // Tipos Dinámicos y Errores
         MAPEO.put(FisioParserConstants.ID, new InfoToken(CategoriaToken.ID, "ID"));
         MAPEO.put(FisioParserConstants.NUM, new InfoToken(CategoriaToken.NUM, "NUM"));

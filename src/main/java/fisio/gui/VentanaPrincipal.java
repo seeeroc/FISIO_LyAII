@@ -51,7 +51,15 @@ import fisio.token.TokenFisio;
 public final class VentanaPrincipal extends JFrame {
 
     private static final String PLACEHOLDER_EJEMPLOS = "Ejemplos…";
-    private static final String EJEMPLO_INICIAL_NOMBRE = "MRU completo";
+    // Fase 2: el ejemplo inicial anterior ("MRU completo") era del lenguaje
+    // de fisica y ya no es compatible con la gramatica actual (Rust-like);
+    // se cambia SOLO esta constante para que la app arranque mostrando algo
+    // que F5+F6 puedan analizar de verdad. El ejemplo viejo NO se borro,
+    // sigue disponible en el combo de Ejemplos.
+    // Revision general Rust-like: "Fase 2: declaraciones y control" se
+    // renombro a "Rust-like - declaraciones y control" en EjemplosFisio
+    // (mismo contenido) -- este nombre se actualiza junto con ese rename.
+    private static final String EJEMPLO_INICIAL_NOMBRE = "Rust-like - declaraciones y control";
     private static final int INDICE_TAB_ALFABETO = 3;
 
     // gui.py usa "FISIO — Analizador Léxico y Sintáctico" como titulo base
@@ -71,6 +79,7 @@ public final class VentanaPrincipal extends JFrame {
     private JLabel lblTokens;
     private JLabel lblErrores;
     private JLabel lblSintaxis;
+    private JLabel lblCursor;
     private JLabel lblEstado;
 
     // Estado del "documento" actual -- mutuamente excluyentes: si
@@ -269,6 +278,7 @@ public final class VentanaPrincipal extends JFrame {
 
         editor = new EditorCodigoPanel();
         editor.addCambioListener(this::onCodigoModificado);
+        editor.addCursorListener(this::onCursorMovido);
         izquierda.add(editor, BorderLayout.CENTER);
         izquierda.setMinimumSize(new Dimension(340, 0));
 
@@ -351,6 +361,11 @@ public final class VentanaPrincipal extends JFrame {
 
         JPanel der = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 4));
         der.setBackground(TemaFisio.BG_STATUS);
+        // Indicador de posicion del cursor (Fase 2): puramente del editor,
+        // no depende de F5/F6 ni de TokenFisio/ErrorLexico/ErrorSintactico.
+        lblCursor = crearEtiquetaStatus("Línea: 1 | Columna: 1", TemaFisio.FG_DIM);
+        der.add(lblCursor);
+        der.add(separadorVerticalStatus());
         lblEstado = crearEtiquetaStatus("Listo", TemaFisio.ACCENT);
         der.add(lblEstado);
 
@@ -368,6 +383,18 @@ public final class VentanaPrincipal extends JFrame {
         lbl.setForeground(color);
         lbl.setFont(TemaFisio.fuenteUi(Font.PLAIN, 9));
         return lbl;
+    }
+
+    // ── Indicador de cursor (Línea/Columna) ────────────────────
+    /**
+     * Actualiza el indicador de la barra de estado. Se alimenta del caret
+     * REAL del editor (ver EditorCodigoPanel.addCursorListener) -- no
+     * tiene relacion con los analizadores lexico/sintactico ni con sus
+     * lineas/columnas de token; funciona aunque nunca se haya ejecutado
+     * F5/F6.
+     */
+    private void onCursorMovido(int linea, int columna) {
+        lblCursor.setText("Línea: " + linea + " | Columna: " + columna);
     }
 
     // ── Acciones: análisis léxico ─────────────────────────────
@@ -447,7 +474,27 @@ public final class VentanaPrincipal extends JFrame {
         // aprobada) -- no se le pasa tokensAnalizados; ese resultado solo
         // se reutiliza aqui abajo para el resaltado, igual que Python
         // reutiliza self._tokens en el resaltar() posterior al parseo.
-        ResultadoSintactico resultado = FisioParserRunner.parse(codigoActual);
+        //
+        // Red de seguridad (Fase 2): la gramatica de FISIO.jj esta escrita
+        // para nunca lanzar ParseException/TokenMgrError ante un error
+        // sintactico normal del lenguaje (usa registrarError()+return null
+        // en vez de dejar que JavaCC aborte) -- pero si de todas formas
+        // algo inesperado se cuela (p.ej. un bug no cubierto por las
+        // pruebas), este catch evita que la excepcion llegue al EDT de
+        // Swing y tumbe la ventana; se informa como error sintactico en
+        // vez de crashear.
+        ResultadoSintactico resultado;
+        try {
+            resultado = FisioParserRunner.parse(codigoActual);
+        } catch (RuntimeException ex) {
+            ex.printStackTrace();
+            JOptionPane.showMessageDialog(this,
+                "Error inesperado durante el analisis sintactico:\n" + ex.getMessage(),
+                "Error interno", JOptionPane.ERROR_MESSAGE);
+            lblSintaxis.setText("Sintaxis: error interno");
+            lblEstado.setText("Error interno en el analisis sintactico");
+            return;
+        }
 
         panelSintactico.poblar(resultado.ast(), resultado.errores());
         editor.aplicarResaltadoSintactico(tokensAnalizados, resultado.errores());

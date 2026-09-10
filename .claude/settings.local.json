@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la \"/c/Users/HP/Documents/Documents/02_ESCUELA/SEMESTRE_7/LENGUAJES Y AUTÓMATAS II/\" 2>/dev/null)",
+      "Bash(echo \"=== timestamps de archivos fuente clave ===\")",
+      "Bash(find '/c/Users/HP/Documents/Documents/02_ESCUELA/SEMESTRE_7/LENGUAJES Y AUTÓMATAS II/FISIO-JavaCC-Fisio_Rust/FISIO-JavaCC-Fisio_Rust/src' -type f -newer '/c/Users/HP/Documents/Documents/02_ESCUELA/SEMESTRE_7/LENGUAJES Y AUTÓMATAS II/FISIO-JavaCC-Fisio_Rust/FISIO-JavaCC-Fisio_Rust/pom.xml')",
+      "Bash(echo \"=== listado completo actual con fechas ===\")",
+      "Bash(find '/c/Users/HP/Documents/Documents/02_ESCUELA/SEMESTRE_7/LENGUAJES Y AUTÓMATAS II/FISIO-JavaCC-Fisio_Rust/FISIO-JavaCC-Fisio_Rust/src' -type f -name *.java -o -name *.jj)",
+      "Bash(xargs ls -la)",
+      "Bash(sort -k6,7)",
+      "Bash(certutil -hashfile '/c/Users/HP/Documents/Documents/02_ESCUELA/SEMESTRE_7/LENGUAJES Y AUTÓMATAS II/FISIO-JavaCC-Fisio_Rust/FISIO-JavaCC-Fisio_Rust/pom.xml' MD5)",
+      "Bash(mkdir -p \"/c/Users/HP/AppData/Local/Temp/claude/C--Users-HP-Documents-Documents-02-ESCUELA-SEMESTRE-7-LENGUAJES-Y-AUT-MATAS-II-FISIO-JavaCC-Fisio-Rust-FISIO-JavaCC-Fisio-Rust/bbeb4fa8-9856-4779-af25-6121c0f5228e/scratchpad\" *)",
+      "Bash(grep -c \"^-- sintactico: 0 errores$\" \"/c/Users/HP/AppData/Local/Temp/claude/C--Users-HP-Documents-Documents-02-ESCUELA-SEMESTRE-7-LENGUAJES-Y-AUT-MATAS-II-FISIO-JavaCC-Fisio-Rust-FISIO-JavaCC-Fisio-Rust/bbeb4fa8-9856-4779-af25-6121c0f5228e/scratchpad/harness_output3.txt\")",
+      "Bash(SCRATCH=\"/c/Users/HP/AppData/Local/Temp/claude/C--Users-HP-Documents-Documents-02-ESCUELA-SEMESTRE-7-LENGUAJES-Y-AUT-MATAS-II-FISIO-JavaCC-Fisio-Rust-FISIO-JavaCC-Fisio-Rust/bbeb4fa8-9856-4779-af25-6121c0f5228e/scratchpad\" *)",
+      "Bash(./mvnw.cmd clean *)",
+      "Bash(./mvnw.cmd compile *)",
+      "Read(//tmp/**)",
+      "Bash(tasklist //FI \"IMAGENAME eq java.exe\")",
+      "Bash(grep -n \"EJEMPLO_INICIAL_NOMBRE =\" src/main/java/fisio/gui/VentanaPrincipal.java)",
+      "Bash(grep -n \"Rust-like - declaraciones y control\" src/main/java/fisio/gui/EjemplosFisio.java src/main/java/fisio/gui/VentanaPrincipal.java)",
+      "Bash(taskkill //F //PID 13512)",
+      "Bash(java -cp 'target/classes;__TRACKED_VAR__' PruebaArchivo __TRACKED_VAR__/ejemplo_extenso.fisio)",
+      "Bash(java -cp 'target/classes;__TRACKED_VAR__' PruebaFisio)",
+      "Bash(taskkill //F //PID 22124)"
+    ]
+  }
+}
