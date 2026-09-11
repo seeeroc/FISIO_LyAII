@@ -276,7 +276,7 @@ TOKEN : {
   | < XOR_BIT_IGUAL: "^=" >
   | < DOBLE_DOS_PUNTOS: "::" >
   | < RANGO_INCLUSIVO: "..=" >
-  | < RANGO: ".." > //RANGO_EXCLUSIVO
+  | < RANGO: ".." > 
   | < IGUAL_QUE: "==" >
   | < DIFERENTE: "!=" >
   | < MENOR_IGUAL: "<=" >
@@ -326,24 +326,8 @@ TOKEN : {
 
 /* =========================================================================
    8. GRAMATICA SINTACTICA -- Fase 2: sentencias de control y declaraciones
-   =========================================================================
-   Subconjunto academico estilo Rust. Un programa es una secuencia de
-   funciones ("fn nombre() { ... }"); dentro de cada funcion, sentencias de
-   declaracion (let/let mut, con tipo opcional), asignacion, if/else (con
-   else-if natural por recursion), while, for..in, loop y return, todas con
-   bloques "{ }" que admiten anidamiento sin limite artificial.
+   ========================================================================= */
 
-   Cada produccion que puede fallar sigue el mismo patron: valida el token
-   actual con getToken(1), y si no es el esperado llama registrarError(...)
-   y retorna null (nunca lanza ParseException) -- exactamente igual que el
-   registrarError()/sincronizar() ya declarados arriba en PARSER_BEGIN.
-   sincronizar()/sincronizarHastaLlaveDerOFin() son los puntos de
-   recuperacion: ';', '}' y EOF, que es lo que permite reportar mas de un
-   error por pasada. ========================================================================= */
-
-/* Programa(): secuencia de funciones + EOF. NodoPrograma.linea/columna
-   siempre (1,1) -- no hay "Inicio"/"Fin" en este lenguaje (a diferencia
-   del FISIO de fisica anterior). */
 NodoPrograma Programa():
 {
     List<NodoAST> funciones = new ArrayList<NodoAST>();
@@ -369,17 +353,6 @@ NodoPrograma Programa():
     { return new NodoPrograma(1, 1, funciones); }
 }
 
-/* Funcion(): "fn" ID "(" [Parametros] ")" ["->" ID] Bloque().
-   Revision general Rust-like: a diferencia de la version anterior, los
-   parametros YA NO se descartan (se preservan como NodoParametroFuncion en
-   la lista de la funcion) y se admite un tipo de retorno opcional
-   ("-> i32/f64/bool/String/..."), guardado tal cual sin validacion
-   semantica -- igual criterio que el tipo opcional de Declaracion().
-   Los errores dentro del encabezado (parametro malformado, coma sin
-   parametro siguiente, tipo de retorno ausente) siguen la MISMA politica
-   "catastrofica" ya documentada abajo: registrarError() + sincronizarHastaEof()
-   + return null, sin recuperacion fina entre funciones (limitacion V1 ya
-   aceptada, no una regresion nueva). */
 NodoAST Funcion():
 {
     Token nombre;
@@ -393,7 +366,7 @@ NodoAST Funcion():
     {
         if (getToken(1).kind != FisioParserConstants.ID) {
             registrarError("Se esperaba identificador despues de 'fn'");
-            sincronizarHastaEof();
+            sincronizarHastaLlaveDerOFin();
             return null;
         }
     }
@@ -401,7 +374,7 @@ NodoAST Funcion():
     {
         if (!coincidirToken(FisioParserConstants.PAREN_IZQ)) {
             registrarError("Se esperaba '(' despues del nombre de la funcion");
-            sincronizarHastaEof();
+            sincronizarHastaLlaveDerOFin();
             return null;
         }
     }
@@ -410,7 +383,7 @@ NodoAST Funcion():
         parametro = Parametro()
         {
             if (parametro == null) {
-                sincronizarHastaEof();
+                sincronizarHastaLlaveDerOFin();
                 return null;
             }
             parametros.add(parametro);
@@ -421,14 +394,14 @@ NodoAST Funcion():
             {
                 if (getToken(1).kind != FisioParserConstants.ID) {
                     registrarError("Se esperaba un parametro despues de ','");
-                    sincronizarHastaEof();
+                    sincronizarHastaLlaveDerOFin();
                     return null;
                 }
             }
             parametro = Parametro()
             {
                 if (parametro == null) {
-                    sincronizarHastaEof();
+                    sincronizarHastaLlaveDerOFin();
                     return null;
                 }
                 parametros.add(parametro);
@@ -438,7 +411,7 @@ NodoAST Funcion():
     {
         if (!coincidirToken(FisioParserConstants.PAREN_DER)) {
             registrarError("Se esperaba ')' para cerrar los parametros");
-            sincronizarHastaEof();
+            sincronizarHastaLlaveDerOFin();
             return null;
         }
     }
@@ -448,7 +421,7 @@ NodoAST Funcion():
         {
             if (getToken(1).kind != FisioParserConstants.ID) {
                 registrarError("Se esperaba tipo de retorno despues de '->'");
-                sincronizarHastaEof();
+                sincronizarHastaLlaveDerOFin();
                 return null;
             }
         }
@@ -463,15 +436,6 @@ NodoAST Funcion():
     }
 }
 
-/* Parametro(): ID ":" ID -- nombre y tipo de un parametro de funcion.
-   Antes ("void Parametro()") se consumia sintacticamente y se descartaba;
-   ahora construye NodoParametroFuncion. Solo se invoca desde Funcion() en
-   posiciones donde ya se verifico que el token actual es ID (LOOKAHEAD(1)
-   antes de la primera llamada, chequeo de ID despues de la ',' antes de
-   cada llamada siguiente), asi que <ID> inicial nunca falla en la practica;
-   el resto de la produccion sigue el mismo patron defensivo que
-   Declaracion() (getToken(1).kind, registrarError, return null sin
-   sincronizar aqui mismo -- el llamador decide la recuperacion). */
 NodoParametroFuncion Parametro():
 {
     Token idTok;
@@ -497,19 +461,6 @@ NodoParametroFuncion Parametro():
     }
 }
 
-/* Bloque(): "{" Sentencia()* [ExpresionFinal] "}". Cada Sentencia() invalida
-   (null) se descarta sin romper el bloque -- permite seguir acumulando
-   errores.
-
-   Revision general Rust-like: se admite el estilo de Rust "la ultima
-   expresion del bloque, SIN ';', es el valor del bloque" (p.ej.
-   "fn f() -> i32 { a * b }"). La alternativa nueva usa LOOKAHEAD sintactico
-   completo "Expresion() <LLAVE_DER>" -- solo se toma cuando una expresion
-   completa esta INMEDIATAMENTE seguida de '}'; cualquier sentencia real
-   (que termina en ';', o un "if/while/for/loop" que termina en su propio
-   '}') sigue yendo por la rama Sentencia() de siempre, sin cambios. Esto
-   evita ambiguedad con "ID ..." (asignacion/llamada/macro) sin tocar
-   Sentencia() para nada. */
 NodoBloque Bloque():
 {
     List<NodoAST> sentencias = new ArrayList<NodoAST>();
@@ -527,11 +478,6 @@ NodoBloque Bloque():
     }
     apertura=<LLAVE_IZQ>
     (
-        // Deteccion de la expresion final vía LOOKAHEAD SEMANTICO (Java
-        // puro: esInicioDeExpresionFinal()), no sintactico -- ver la nota
-        // completa junto a esos metodos en PARSER_BEGIN. Un intento previo
-        // con LOOKAHEAD(Expresion() <LLAVE_DER>) (sintactico) resulto poco
-        // confiable para expresiones con parentesis/llamadas a funcion.
         LOOKAHEAD({ esInicioDeExpresionFinal() })
         expresionFinal = Expresion()
       |
@@ -553,22 +499,6 @@ NodoBloque Bloque():
     }
 }
 
-/* Sentencia(): valida el primer token y despacha a la produccion real vía
-   una eleccion BNF genuina (JavaCC decide entre las alternativas por su
-   propio token inicial, ya garantizado por el chequeo previo).
-
-   Revision general Rust-like: LET/IF/WHILE/FOR/LOOP/RETURN siguen
-   despachando exactamente igual que antes (sin cambios). Cuando el primer
-   token es ID, antes se asumia SIEMPRE Asignacion() -- eso es justo lo que
-   producia "Se esperaba '=' en la asignacion" para "println!(...)" o
-   "foo();". Ahora se distinguen 3 formas con LOOKAHEAD sintactico MINIMO
-   de 2 tokens (JavaCC/BNF real, no un parser manual en Java):
-     ID "!" ...   -> InvocacionMacroSentencia() (println!(...), etc.)
-     ID "(" ...   -> SentenciaExpresion()       (foo();, foo(1, 2);)
-     cualquier otro caso empezando en ID -> Asignacion() (=, +=, -=, *=, /=, %=)
-   El orden importa: los dos LOOKAHEAD explicitos se prueban antes que la
-   alternativa por defecto (Asignacion(), sin LOOKAHEAD propio, como ya
-   tenia el archivo original). */
 NodoAST Sentencia():
 {
     NodoAST resultado = null;
@@ -593,115 +523,27 @@ NodoAST Sentencia():
       | resultado = SentenciaFor()
       | resultado = SentenciaLoop()
       | resultado = SentenciaReturn()
-      | LOOKAHEAD(<ID> <NEGACION>) resultado = InvocacionMacroSentencia()
-      | LOOKAHEAD(<ID> <PAREN_IZQ>) resultado = SentenciaExpresion()
-      | resultado = Asignacion()
+      | LOOKAHEAD(2) resultado = Asignacion() 
+      | resultado = SentenciaExpresion()
     )
     { return resultado; }
 }
 
-/* ListaArgumentos(): Expresion() ("," Expresion())* -- lista de argumentos
-   compartida entre llamadas a funcion (Primario(), como expresion) e
-   invocaciones de macro (InvocacionMacroSentencia()). Cada Expresion()
-   invalida (null) se descarta sin romper la lista -- mismo criterio que el
-   resto del archivo (Bloque()/Programa() descartan sentencias/funciones
-   nulas de la misma forma). */
-List<NodoAST> ListaArgumentos():
-{
-    List<NodoAST> argumentos = new ArrayList<NodoAST>();
-    NodoAST primero;
-    NodoAST siguiente;
-}
-{
-    primero = Expresion()
-    {
-        if (primero != null) {
-            argumentos.add(primero);
-        }
-    }
-    (
-        LOOKAHEAD(1)
-        <COMA>
-        siguiente = Expresion()
-        {
-            if (siguiente != null) {
-                argumentos.add(siguiente);
-            }
-        }
-    )*
-    { return argumentos; }
-}
-
-/* InvocacionMacroSentencia(): ID "!" "(" [ListaArgumentos] ")" ";".
-   Reconocimiento sintactico MINIMO de una invocacion de macro estilo
-   "println!(...)": forma general "identificador ! ( [argumentos] ) ;".
-   "println" NO se vuelve palabra reservada -- el lexer lo sigue viendo
-   como ID normal; es esta produccion la que reconoce la secuencia de
-   tokens ID NEGACION PAREN_IZQ ... PAREN_DER PUNTO_COMA y construye
-   NodoInvocacionMacro. Sin sistema real de macros de Rust (sin
-   macro_rules!, sin expansion): solo reconocimiento sintactico + AST. */
-NodoAST InvocacionMacroSentencia():
-{
-    Token nombre;
-    List<NodoAST> argumentos = new ArrayList<NodoAST>();
-}
-{
-    nombre=<ID>
-    <NEGACION>
-    {
-        if (!coincidirToken(FisioParserConstants.PAREN_IZQ)) {
-            registrarError("Se esperaba '(' despues de '!' en la macro");
-            sincronizar();
-            return null;
-        }
-    }
-    (
-        LOOKAHEAD(1)
-        argumentos = ListaArgumentos()
-    )?
-    {
-        if (!coincidirToken(FisioParserConstants.PAREN_DER)) {
-            registrarError("Se esperaba ')' al final de la macro");
-            sincronizar();
-            return null;
-        }
-        if (!coincidirToken(FisioParserConstants.PUNTO_COMA)) {
-            registrarError("Se esperaba ';' al final de la macro");
-            sincronizar();
-        }
-        TokenFisio nombreFisio = tokenFisioDe(nombre);
-        return new NodoInvocacionMacro(nombreFisio.linea(), nombreFisio.columna(), nombreFisio, argumentos);
-    }
-}
-
-/* SentenciaExpresion(): Expresion() ";". En la practica, hoy la unica
-   forma util que llega aqui (ver el LOOKAHEAD(<ID> <PAREN_IZQ>) en
-   Sentencia()) es una llamada a funcion usada como sentencia completa:
-   "foo();", "foo(1, 2);". Reutiliza Expresion()/Primario() (donde vive el
-   reconocimiento de "nombre(args)") en vez de duplicar el parseo de la
-   llamada en una produccion aparte. */
 NodoAST SentenciaExpresion():
 {
-    NodoAST expresion;
+    NodoAST exp;
 }
 {
-    expresion = Expresion()
+    exp = Expresion() 
     {
-        if (expresion == null) {
-            sincronizar();
-            return null;
-        }
         if (!coincidirToken(FisioParserConstants.PUNTO_COMA)) {
-            registrarError("Se esperaba ';' al final de la sentencia");
+            registrarError("Se esperaba ';' al final de la expresion");
             sincronizar();
         }
-        return expresion;
+        return exp; 
     }
 }
 
-/* Declaracion(): "let" ["mut"] ID [":" ID] "=" Expresion() ";".
-   El tipo (i32, f64, ...) NO es palabra reservada en este proyecto, asi
-   que se reutiliza ID tal cual -- sin validacion semantica alguna. */
 NodoAST Declaracion():
 {
     Token idTok;
@@ -757,16 +599,6 @@ NodoAST Declaracion():
     }
 }
 
-/* Asignacion(): ID ("=" | "+=" | "-=" | "*=" | "/=" | "%=") Expresion() ";".
-   "lugar" se envuelve en NodoIdentificador para reutilizar el campo
-   generico NodoAsignacion.lugar ya existente en el AST heredado.
-
-   Revision general Rust-like: se agregan las 5 asignaciones compuestas
-   ademas de la simple "=" (antes la unica admitida). El mensaje de error
-   "Se esperaba '=' en la asignacion" se conserva TAL CUAL para cuando no
-   aparece NINGUNO de los 6 operadores -- no se reformula, solo se amplia
-   la condicion que lo dispara. El operador realmente encontrado se guarda
-   en NodoAsignacion.operador() (antes ese campo no existia). */
 NodoAST Asignacion():
 {
     Token idTok;
@@ -810,8 +642,6 @@ NodoAST Asignacion():
     }
 }
 
-/* SentenciaIf(): "if" Expresion() Bloque() ["else" (SentenciaIf() | Bloque())].
-   El "else if" sale gratis por la recursion de la segunda alternativa. */
 NodoAST SentenciaIf():
 {
     Token ifTok;
@@ -823,12 +653,6 @@ NodoAST SentenciaIf():
     ifTok=<IF>
     condicion = Expresion()
     {
-        /* Sin registrarError propio aqui: si condicion es null, Primario()
-           ya registro "Se esperaba una expresion" sobre el token exacto
-           que fallo -- agregar un segundo mensaje aqui duplicaria el
-           reporte para un mismo error (mismo criterio de "un mensaje por
-           fallo, sin re-registrar en cada nivel de propagacion" que usa
-           el resto de esta jerarquia de expresiones). */
         if (condicion == null) {
             sincronizar();
             return null;
@@ -839,11 +663,6 @@ NodoAST SentenciaIf():
         LOOKAHEAD(1)
         <ELSE>
         {
-            /* Igual razon que en ExpUnaria(): SentenciaIf() y Bloque()
-               tienen FIRST-sets fijos (IF y LLAVE_IZQ); sin este guard,
-               un 'else' seguido de cualquier otra cosa (p.ej. "else 5;")
-               haria que JavaCC lanzara ParseException antes de que
-               ninguna produccion pudiera registrar el error. */
             if (getToken(1).kind != FisioParserConstants.IF
                     && getToken(1).kind != FisioParserConstants.LLAVE_IZQ) {
                 registrarError("Se esperaba '{' o 'if' despues de 'else'");
@@ -864,7 +683,6 @@ NodoAST SentenciaIf():
     }
 }
 
-/* SentenciaWhile(): "while" Expresion() Bloque(). */
 NodoAST SentenciaWhile():
 {
     Token whileTok;
@@ -875,8 +693,6 @@ NodoAST SentenciaWhile():
     whileTok=<WHILE>
     condicion = Expresion()
     {
-        // Mismo criterio que en SentenciaIf(): sin mensaje propio, Primario()
-        // ya registro el error especifico sobre el token que fallo.
         if (condicion == null) {
             sincronizar();
             return null;
@@ -889,8 +705,6 @@ NodoAST SentenciaWhile():
     }
 }
 
-/* SentenciaFor(): "for" ID "in" Expresion() Bloque(). Solo reconocimiento
-   sintactico: "iterable" es cualquier expresion, sin iteradores reales. */
 NodoAST SentenciaFor():
 {
     Token forTok;
@@ -929,7 +743,6 @@ NodoAST SentenciaFor():
     }
 }
 
-/* SentenciaLoop(): "loop" Bloque(). Sin semantica (no hay 'break'/'continue'). */
 NodoAST SentenciaLoop():
 {
     Token loopTok;
@@ -944,7 +757,6 @@ NodoAST SentenciaLoop():
     }
 }
 
-/* SentenciaReturn(): "return" [Expresion()] ";". */
 NodoAST SentenciaReturn():
 {
     Token returnTok;
@@ -966,49 +778,32 @@ NodoAST SentenciaReturn():
     }
 }
 
-/* =========================================================================
-   EXPRESIONES -- jerarquia de precedencia (de menor a mayor):
-   ||  &&  ==/!=  </>/<=/>=  +/-  * / %  unario(!,-)  primario
-   Cada nivel reutiliza NodoOperacion (aritmetico/logico binario) o
-   NodoOperacionRelacional (comparacion), ambos ya existentes en el AST
-   heredado -- ningun nivel crea un nodo nuevo. El patron "izquierda==null
-   => return null" (propagacion sin mensaje propio -- el error ya se
-   registro mas abajo, en Primario()) es identico al usado en el proyecto
-   FISIO-JavaCC anterior para su propia jerarquia de expresiones.
-   ========================================================================= */
-
-/* Expresion(): ExpOr() [".." ExpOr()].
-   Revision general Rust-like: ".." se integra como el operador de MENOR
-   precedencia de toda la jerarquia (por debajo incluso de "||"), y NO
-   asociativo (un solo ".." por expresion: "a..b", no "a..b..c") -- de ahi
-   que el envoltorio use "?" y no "*". Esto alcanza para el caso pedido
-   ("for i in 0..10 { ... }", "for i in inicio..fin { ... }") sin tocar
-   ExpOr()..Primario() en absoluto: para cualquier entrada que no contenga
-   un token RANGO, este nivel se reduce exactamente al ExpOr() de siempre
-   (mismo resultado, cero cambio de comportamiento). */
 NodoAST Expresion():
 {
+    NodoAST resultado;
+}
+{
+    resultado = ExpRango()
+    { return resultado; }
+}
+
+NodoAST ExpRango():
+{
     NodoAST izquierda;
-    NodoAST derecha;
-    Token rangoTok;
+    NodoAST derecha = null;
+    Token operador;
 }
 {
     izquierda = ExpOr()
-    {
-        if (izquierda == null) {
-            return null;
-        }
-    }
     (
         LOOKAHEAD(1)
-        rangoTok=<RANGO>
+        ( operador=<RANGO> | operador=<RANGO_INCLUSIVO> )
         derecha = ExpOr()
         {
-            if (derecha == null) {
-                return null;
-            }
-            TokenFisio rangoFisio = tokenFisioDe(rangoTok);
-            izquierda = new NodoRango(rangoFisio.linea(), rangoFisio.columna(), izquierda, derecha);
+            if (derecha == null) return null;
+            TokenFisio opFisio = tokenFisioDe(operador);
+            // Eliminamos el booleano extra para coincidir con la clase de tu compañero
+            izquierda = new NodoRango(opFisio.linea(), opFisio.columna(), izquierda, derecha);
         }
     )?
     { return izquierda; }
@@ -1184,19 +979,6 @@ NodoAST ExpMultiplicativa():
     { return izquierda; }
 }
 
-/* ExpUnaria(): ('-'|'!') ExpUnaria() | Primario(). Sintactico, no lexico:
-   el NUM sigue siendo solo digitos (token MENOS + token NUM, nunca un
-   NUM con signo); el parser construye NodoOperacionUnaria. Recursiva a la
-   derecha (permite "--5", "!!x", etc., igual que en Rust).
-
-   El chequeo de "es esto el inicio de una expresion" vive AQUI (no solo
-   dentro de Primario()) porque JavaCC decide la eleccion de abajo por el
-   FIRST-set ESTATICO de cada alternativa (MENOS/NEGACION vs el FIRST de
-   Primario()); si el token actual no esta en ninguno de los dos, JavaCC
-   lanza ParseException ANTES de siquiera llamar a Primario() -- su propio
-   guard interno nunca llega a ejecutarse en ese caso. Este guard previo
-   es el que realmente evita la excepcion (mismo patron que Sentencia()/
-   Primario(): validar con getToken(1) antes de la eleccion BNF real). */
 NodoAST ExpUnaria():
 {
     Token operador;
@@ -1231,23 +1013,6 @@ NodoAST ExpUnaria():
     )
 }
 
-/* Primario(): NUM | STRING | TRUE | FALSE | ID ["(" [ListaArgumentos] ")"] | "(" Expresion() ")".
-   El guard de aqui abajo queda como segunda linea de defensa (Primario()
-   solo se llama desde ExpUnaria(), que ya filtro el token, pero se deja
-   por si en el futuro se llama desde otro lugar).
-   Decision de diseno (documentada en el reporte final): STRING/TRUE/FALSE
-   se envuelven en NodoNumero -- igual que NUM -- en vez de crear un nodo
-   "NodoLiteral" nuevo solo para esto; ninguno de los casos de prueba
-   obligatorios de la Fase 2 depende de distinguirlos, y evita un nodo
-   practicamente identico a NodoNumero (mismo shape: linea/columna/token).
-
-   Revision general Rust-like: la rama ID se amplia con un "(" opcional --
-   si un ID esta inmediatamente seguido de "(", se reconoce como llamada a
-   funcion (NodoLlamadaFuncion) en vez de identificador simple; si no, el
-   comportamiento es EXACTAMENTE el de antes (NodoIdentificador). Esto
-   habilita "nombre(args)" en CUALQUIER posicion de expresion (p.ej.
-   "let resultado = multiplicar(contador, 5);"), reutilizando la misma
-   ListaArgumentos() que usa InvocacionMacroSentencia(). */
 NodoAST Primario():
 {
     Token t;
@@ -1291,22 +1056,24 @@ NodoAST Primario():
       |
         t=<ID>
         (
-            LOOKAHEAD(1)
-            <PAREN_IZQ>
+            LOOKAHEAD(2)
+            <NEGACION> <PAREN_IZQ> 
+            { List<NodoAST> argsMacro = new ArrayList<>(); }
+            ( Argumentos(argsMacro) )? 
+            <PAREN_DER>
             {
-                argumentos = new ArrayList<NodoAST>();
-            }
-            (
-                LOOKAHEAD(1)
-                argumentos = ListaArgumentos()
-            )?
-            {
-                if (!coincidirToken(FisioParserConstants.PAREN_DER)) {
-                    registrarError("Se esperaba ')' al final de la llamada");
-                    return null;
-                }
                 TokenFisio tf = tokenFisioDe(t);
-                return new NodoLlamadaFuncion(tf.linea(), tf.columna(), tf, argumentos);
+                return new NodoInvocacionMacro(tf.linea(), tf.columna(), tf, argsMacro);
+            }
+          |
+            LOOKAHEAD(2)
+            <PAREN_IZQ> 
+            { List<NodoAST> argsFunc = new ArrayList<>(); }
+            ( Argumentos(argsFunc) )? 
+            <PAREN_DER>
+            {
+                TokenFisio tf = tokenFisioDe(t);
+                return new NodoLlamadaFuncion(tf.linea(), tf.columna(), tf, argsFunc);
             }
           |
             {
@@ -1329,4 +1096,13 @@ NodoAST Primario():
             return new NodoAgrupacion(tf.linea(), tf.columna(), resultado);
         }
     )
+}
+
+void Argumentos(List<NodoAST> lista):
+{ NodoAST exp; }
+{
+    exp = Expresion() { if (exp != null) lista.add(exp); }
+    (
+        <COMA> exp = Expresion() { if (exp != null) lista.add(exp); }
+    )*
 }

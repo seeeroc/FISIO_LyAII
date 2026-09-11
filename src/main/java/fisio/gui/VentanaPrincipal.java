@@ -397,7 +397,18 @@ public final class VentanaPrincipal extends JFrame {
         lblCursor.setText("Línea: " + linea + " | Columna: " + columna);
     }
 
-    // ── Acciones: análisis léxico ─────────────────────────────
+    // ── Acciones: análisis sintáctico ─────────────────────────
+    /**
+     * Equivalente a _analizar_sintactico en gui.py. Comprobaciones
+     * defensivas, en el mismo orden y con los mismos mensajes:
+     * 1) hubo un analisis lexico previo (codigoAnalizadoLexico != null);
+     * 2) el codigo actual sigue siendo exactamente el analizado por F5
+     *    (aunque la invalidacion de 6C ya lo garantiza en la practica, se
+     *    revalida aqui de forma explicita, igual que Python);
+     * 3) ese analisis lexico no tuvo errores.
+     * Si algo falla, NO se ejecuta FisioParserRunner.
+     */
+// ── Acciones: análisis léxico ─────────────────────────────
     private void analizarLexico() {
         String codigo = editor.getCodigo();
         if (codigo.strip().isEmpty()) {
@@ -422,7 +433,9 @@ public final class VentanaPrincipal extends JFrame {
         lblTokens.setText("Tokens: " + nTok);
         lblErrores.setText("Errores: " + nErr);
         lblSintaxis.setText("Sintaxis: —");
-        btnSintactico.setEnabled(nErr == 0);
+        
+        // ¡NUEVO!: Siempre habilitamos el botón sintáctico, haya o no haya errores léxicos.
+        btnSintactico.setEnabled(true);
 
         if (nErr == 0) {
             lblEstado.setText("Analisis lexico exitoso");
@@ -434,16 +447,6 @@ public final class VentanaPrincipal extends JFrame {
     }
 
     // ── Acciones: análisis sintáctico ─────────────────────────
-    /**
-     * Equivalente a _analizar_sintactico en gui.py. Comprobaciones
-     * defensivas, en el mismo orden y con los mismos mensajes:
-     * 1) hubo un analisis lexico previo (codigoAnalizadoLexico != null);
-     * 2) el codigo actual sigue siendo exactamente el analizado por F5
-     *    (aunque la invalidacion de 6C ya lo garantiza en la practica, se
-     *    revalida aqui de forma explicita, igual que Python);
-     * 3) ese analisis lexico no tuvo errores.
-     * Si algo falla, NO se ejecuta FisioParserRunner.
-     */
     private void analizarSintactico() {
         String codigoActual = editor.getCodigo();
 
@@ -462,27 +465,9 @@ public final class VentanaPrincipal extends JFrame {
             return;
         }
 
-        if (!erroresLexicosAnalizados.isEmpty()) {
-            JOptionPane.showMessageDialog(this,
-                "Corrige los errores lexicos antes de ejecutar el analisis sintactico.",
-                "Errores lexicos", JOptionPane.WARNING_MESSAGE);
-            btnSintactico.setEnabled(false);
-            return;
-        }
+        // ¡NUEVO!: Eliminamos el bloque 'if (!erroresLexicosAnalizados.isEmpty())' 
+        // que impedía el análisis sintáctico. Ahora pasa directo al Parser.
 
-        // F6 re-tokeniza internamente sobre el String (arquitectura ya
-        // aprobada) -- no se le pasa tokensAnalizados; ese resultado solo
-        // se reutiliza aqui abajo para el resaltado, igual que Python
-        // reutiliza self._tokens en el resaltar() posterior al parseo.
-        //
-        // Red de seguridad (Fase 2): la gramatica de FISIO.jj esta escrita
-        // para nunca lanzar ParseException/TokenMgrError ante un error
-        // sintactico normal del lenguaje (usa registrarError()+return null
-        // en vez de dejar que JavaCC aborte) -- pero si de todas formas
-        // algo inesperado se cuela (p.ej. un bug no cubierto por las
-        // pruebas), este catch evita que la excepcion llegue al EDT de
-        // Swing y tumbe la ventana; se informa como error sintactico en
-        // vez de crashear.
         ResultadoSintactico resultado;
         try {
             resultado = FisioParserRunner.parse(codigoActual);
