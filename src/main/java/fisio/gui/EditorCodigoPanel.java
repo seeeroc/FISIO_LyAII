@@ -25,6 +25,7 @@ import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
 
 import fisio.analysis.ErrorSintactico;
+import fisio.semantic.ErrorSemantico;
 import fisio.token.ErrorLexico;
 import fisio.token.TokenFisio;
 
@@ -291,6 +292,19 @@ public final class EditorCodigoPanel extends JPanel {
 
         for (ErrorSintactico err : erroresSintacticos) {
             aplicarEstiloRango("ERROR", err.linea(), err.columna(), err.token().lexema().length());
+        }
+    }
+
+    public void aplicarResaltadoSemantico(List<TokenFisio> tokens, List<ErrorSemantico> errores) {
+        aplicarResaltado(tokens, List.of());
+        for (ErrorSemantico error : errores) {
+            int inicio = offsetDe(error.linea(), 1);
+            int fin = finDeLinea(error.linea());
+            if (fin > inicio) documentoEstilado.setCharacterAttributes(inicio, fin - inicio, estiloLineaError, false);
+            int longitud = tokens.stream()
+                .filter(t -> t.linea() == error.linea() && t.columna() == error.columna())
+                .mapToInt(t -> t.lexema().length()).findFirst().orElse(1);
+            aplicarEstiloRango("ERROR", error.linea(), error.columna(), longitud);
         }
     }
 

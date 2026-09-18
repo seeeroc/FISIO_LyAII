@@ -89,6 +89,36 @@ public class FisioParser {
         return false;
     }
 
+    private boolean esInicioExpresion(int kind) {
+        return kind == NUM || kind == STRING || kind == TRUE || kind == FALSE
+            || kind == ID || kind == PAREN_IZQ || kind == MENOS || kind == NEGACION;
+    }
+
+    /* Recuperacion local: no consumir el cierre ni el limite de sentencia.
+       Las comas de llamadas anidadas no sincronizan la llamada exterior. */
+    private void sincronizarArgumento() {
+        int parentesis = 0;
+        while (true) {
+            int k = getToken(1).kind;
+            if (k == EOF || k == PUNTO_COMA || k == LLAVE_IZQ || k == LLAVE_DER
+                    || (parentesis == 0 && (k == COMA || k == PAREN_DER))) {
+                return;
+            }
+            if (k == PAREN_IZQ) parentesis++;
+            if (k == PAREN_DER) parentesis--;
+            getNextToken();
+        }
+    }
+
+    /* Una condicion/iterable invalido no debe confundir su cuerpo con
+       el cierre de la funcion: conservar '{' para que Bloque lo analice. */
+    private void sincronizarCabeceraControl() {
+        while (getToken(1).kind != EOF && getToken(1).kind != PUNTO_COMA
+                && getToken(1).kind != LLAVE_IZQ && getToken(1).kind != LLAVE_DER) {
+            getNextToken();
+        }
+    }
+
     /* Punto de sincronizacion para sentencias: avanza hasta ';' (lo
        consume, cierre natural de sentencia), '}' o EOF (ninguno de los
        dos se consume aqui: los debe ver el nivel que llamo, Bloque()). */
@@ -478,8 +508,13 @@ NodoBloque Bloque():
     }
     apertura=<LLAVE_IZQ>
     (
+        LOOKAHEAD(1)
+        (
         LOOKAHEAD({ esInicioDeExpresionFinal() })
         expresionFinal = Expresion()
+        {
+            if (expresionFinal == null) sincronizar();
+        }
       |
         LOOKAHEAD(1)
         sentencia = Sentencia()
@@ -488,6 +523,7 @@ NodoBloque Bloque():
                 sentencias.add(sentencia);
             }
         }
+        )
     )*
     {
         if (!coincidirToken(FisioParserConstants.LLAVE_DER)) {
@@ -536,8 +572,14 @@ NodoAST SentenciaExpresion():
 {
     exp = Expresion() 
     {
+        if (exp == null) {
+            sincronizar();
+            return null;
+        }
         if (!coincidirToken(FisioParserConstants.PUNTO_COMA)) {
-            registrarError("Se esperaba ';' al final de la expresion");
+            registrarError(exp instanceof NodoInvocacionMacro
+                ? "Se esperaba ';' al final de la macro"
+                : "Se esperaba ';' al final de la expresion");
             sincronizar();
         }
         return exp; 
@@ -654,8 +696,11 @@ NodoAST SentenciaIf():
     condicion = Expresion()
     {
         if (condicion == null) {
-            sincronizar();
-            return null;
+            sincronizarCabeceraControl();
+            if (getToken(1).kind != LLAVE_IZQ) {
+                sincronizar();
+                return null;
+            }
         }
     }
     cuerpo = Bloque()
@@ -678,6 +723,7 @@ NodoAST SentenciaIf():
         )
     )?
     {
+        if (condicion == null) return null;
         TokenFisio ifFisio = tokenFisioDe(ifTok);
         return new NodoIf(ifFisio.linea(), ifFisio.columna(), condicion, cuerpo, otro);
     }
@@ -694,12 +740,16 @@ NodoAST SentenciaWhile():
     condicion = Expresion()
     {
         if (condicion == null) {
-            sincronizar();
-            return null;
+            sincronizarCabeceraControl();
+            if (getToken(1).kind != LLAVE_IZQ) {
+                sincronizar();
+                return null;
+            }
         }
     }
     cuerpo = Bloque()
     {
+        if (condicion == null) return null;
         TokenFisio whileFisio = tokenFisioDe(whileTok);
         return new NodoWhile(whileFisio.linea(), whileFisio.columna(), condicion, cuerpo);
     }
@@ -732,12 +782,16 @@ NodoAST SentenciaFor():
     iterable = Expresion()
     {
         if (iterable == null) {
-            sincronizar();
-            return null;
+            sincronizarCabeceraControl();
+            if (getToken(1).kind != LLAVE_IZQ) {
+                sincronizar();
+                return null;
+            }
         }
     }
     cuerpo = Bloque()
     {
+        if (iterable == null) return null;
         TokenFisio idFisio = tokenFisioDe(idTok);
         return new NodoFor(idFisio.linea(), idFisio.columna(), idFisio, iterable, cuerpo);
     }
@@ -795,9 +849,18 @@ NodoAST ExpRango():
 }
 {
     izquierda = ExpOr()
+    {
+        if (izquierda == null) return null;
+    }
     (
         LOOKAHEAD(1)
         ( operador=<RANGO> | operador=<RANGO_INCLUSIVO> )
+        {
+            if (!esInicioExpresion(getToken(1).kind)) {
+                registrarError("Se esperaba expresion despues de '" + operador.image + "'");
+                return null;
+            }
+        }
         derecha = ExpOr()
         {
             if (derecha == null) return null;
@@ -1056,22 +1119,34 @@ NodoAST Primario():
       |
         t=<ID>
         (
-            LOOKAHEAD(2)
-            <NEGACION> <PAREN_IZQ> 
-            { List<NodoAST> argsMacro = new ArrayList<>(); }
-            ( Argumentos(argsMacro) )? 
-            <PAREN_DER>
+            LOOKAHEAD(1)
+            <NEGACION>
             {
+                if (!coincidirToken(PAREN_IZQ)) {
+                    registrarError("Se esperaba '(' despues de '!'");
+                    return null;
+                }
+            }
+            { List<NodoAST> argsMacro = new ArrayList<>(); }
+            Argumentos(argsMacro)
+            {
+                if (!coincidirToken(PAREN_DER)) {
+                    registrarError("Se esperaba ')' al final de la macro");
+                    return null;
+                }
                 TokenFisio tf = tokenFisioDe(t);
                 return new NodoInvocacionMacro(tf.linea(), tf.columna(), tf, argsMacro);
             }
           |
-            LOOKAHEAD(2)
+            LOOKAHEAD(1)
             <PAREN_IZQ> 
             { List<NodoAST> argsFunc = new ArrayList<>(); }
-            ( Argumentos(argsFunc) )? 
-            <PAREN_DER>
+            Argumentos(argsFunc)
             {
+                if (!coincidirToken(PAREN_DER)) {
+                    registrarError("Se esperaba ')' al final de la llamada");
+                    return null;
+                }
                 TokenFisio tf = tokenFisioDe(t);
                 return new NodoLlamadaFuncion(tf.linea(), tf.columna(), tf, argsFunc);
             }
@@ -1101,8 +1176,45 @@ NodoAST Primario():
 void Argumentos(List<NodoAST> lista):
 { NodoAST exp; }
 {
-    exp = Expresion() { if (exp != null) lista.add(exp); }
+    {
+        if (getToken(1).kind == PAREN_DER) return;
+        if (!esInicioExpresion(getToken(1).kind)) {
+            registrarError("Se esperaba argumento");
+            sincronizarArgumento();
+            // Una coma inicial se recupera en la repeticion BNF de abajo.
+            if (getToken(1).kind != COMA) return;
+        }
+    }
     (
-        <COMA> exp = Expresion() { if (exp != null) lista.add(exp); }
+        LOOKAHEAD({ esInicioExpresion(getToken(1).kind) })
+        exp = Expresion()
+        {
+            if (exp != null) lista.add(exp);
+            else sincronizarArgumento();
+            if (esInicioExpresion(getToken(1).kind)) {
+                registrarError("Se esperaba ',' entre argumentos");
+                sincronizarArgumento();
+            }
+        }
+    )?
+    (
+        LOOKAHEAD(1)
+        <COMA>
+        {
+            if (!esInicioExpresion(getToken(1).kind)) {
+                registrarError("Se esperaba argumento despues de ','");
+                sincronizarArgumento();
+                return;
+            }
+        }
+        exp = Expresion()
+        {
+            if (exp != null) lista.add(exp);
+            else sincronizarArgumento();
+            if (esInicioExpresion(getToken(1).kind)) {
+                registrarError("Se esperaba ',' entre argumentos");
+                sincronizarArgumento();
+            }
+        }
     )*
 }

@@ -36,6 +36,8 @@ import fisio.analysis.FisioLexerRunner;
 import fisio.analysis.FisioParserRunner;
 import fisio.analysis.ResultadoLexico;
 import fisio.analysis.ResultadoSintactico;
+import fisio.semantic.FisioSemanticRunner;
+import fisio.semantic.ResultadoSemantico;
 import fisio.token.ErrorLexico;
 import fisio.token.TokenFisio;
 
@@ -45,8 +47,8 @@ import fisio.token.TokenFisio;
  * Paso 6D — "Léxico [F5]" (boton y tecla) ejecuta FisioLexerRunner y
  * alimenta tabla de tokens, resumen, resaltado del editor y status bar;
  * "Sintáctico [F6]" (boton y tecla) ejecuta FisioParserRunner y alimenta
- * PanelSintactico (AST/errores) y el resaltado del editor. NO se
- * implementa analisis semantico, ejecucion, simulacion ni graficas.
+ * PanelSintactico (AST/errores) y el resaltado del editor. F7 analiza
+ * semantica despues de F5/F6 validos; no ejecuta ni simula programas.
  */
 public final class VentanaPrincipal extends JFrame {
 
@@ -71,6 +73,9 @@ public final class VentanaPrincipal extends JFrame {
     private TablaTokensPanel tablaTokens;
     private PanelResumen panelResumen;
     private PanelSintactico panelSintactico;
+    private PanelSemantico panelSemantico;
+    private ResultadoSintactico sintaxisActual;
+    private String codigoAnalizadoSintactico;
 
     private JButton btnSintactico;
     private JComboBox<String> comboEjemplos;
@@ -103,11 +108,10 @@ public final class VentanaPrincipal extends JFrame {
     // Equivalentes minimos de self._tokens / self._errores en gui.py:
     // NO se recalculan en F6 (arquitectura aprobada: F6 re-tokeniza
     // internamente SOLO dentro de FisioParserRunner para el parseo; para
-    // la GUI, el resaltado y el chequeo defensivo de "0 errores lexicos"
+    // la GUI, el resaltado y el chequeo de "0 errores lexicos" de F7
     // se reutiliza el resultado de F5, exactamente como Python reutiliza
     // self._tokens en editor.resaltar(self._tokens, ...) dentro de
-    // _analizar_sintactico). No existe codigoAnalizadoSintactico aparte:
-    // gui.py tampoco lo tiene, solo revalida contra _codigo_analizado_lexico.
+    // _analizar_sintactico). F7 valida ademas el texto asociado al AST de F6.
     private List<TokenFisio> tokensAnalizados = List.of();
     private List<ErrorLexico> erroresLexicosAnalizados = List.of();
 
@@ -161,6 +165,14 @@ public final class VentanaPrincipal extends JFrame {
             @Override
             public void actionPerformed(ActionEvent e) {
                 analizarSintactico();
+            }
+        });
+        getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+            .put(KeyStroke.getKeyStroke("F7"), "analizarSemantico");
+        getRootPane().getActionMap().put("analizarSemantico", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                analizarSemantico();
             }
         });
     }
@@ -290,10 +302,11 @@ public final class VentanaPrincipal extends JFrame {
         tablaTokens = new TablaTokensPanel();
         panelResumen = new PanelResumen();
         panelSintactico = new PanelSintactico();
+        panelSemantico = new PanelSemantico(this::analizarSemantico);
         PanelAlfabeto panelAlfabeto = new PanelAlfabeto();
 
-        String[] nombresTabs = {"Tokens", "Resumen", "Sintaxis", "Alfabeto"};
-        JComponent[] paneles = {tablaTokens, panelResumen, panelSintactico, panelAlfabeto};
+        String[] nombresTabs = {"Tokens", "Resumen", "Sintaxis", "Alfabeto", "Semántica"};
+        JComponent[] paneles = {tablaTokens, panelResumen, panelSintactico, panelAlfabeto, panelSemantico};
         List<JLabel> etiquetasTabs = new ArrayList<>();
         for (int i = 0; i < nombresTabs.length; i++) {
             tabs.addTab(null, paneles[i]);
@@ -410,6 +423,7 @@ public final class VentanaPrincipal extends JFrame {
      */
 // ── Acciones: análisis léxico ─────────────────────────────
     private void analizarLexico() {
+        invalidarSemantica();
         String codigo = editor.getCodigo();
         if (codigo.strip().isEmpty()) {
             JOptionPane.showMessageDialog(this,
@@ -448,6 +462,7 @@ public final class VentanaPrincipal extends JFrame {
 
     // ── Acciones: análisis sintáctico ─────────────────────────
     private void analizarSintactico() {
+        invalidarSemantica();
         String codigoActual = editor.getCodigo();
 
         if (codigoAnalizadoLexico == null) {
@@ -482,6 +497,9 @@ public final class VentanaPrincipal extends JFrame {
         }
 
         panelSintactico.poblar(resultado.ast(), resultado.errores());
+        sintaxisActual = resultado;
+        codigoAnalizadoSintactico = codigoActual;
+        panelSemantico.disponible(resultado.errores().isEmpty() && erroresLexicosAnalizados.isEmpty());
         editor.aplicarResaltadoSintactico(tokensAnalizados, resultado.errores());
 
         int nErr = resultado.errores().size();
@@ -494,6 +512,30 @@ public final class VentanaPrincipal extends JFrame {
         }
 
         tabs.setSelectedIndex(2);
+    }
+
+    private void analizarSemantico() {
+        tabs.setSelectedComponent(panelSemantico);
+        if (sintaxisActual == null || !editor.getCodigo().equals(codigoAnalizadoSintactico)) {
+            invalidarSemantica();
+            lblEstado.setText("Semantica pendiente: ejecuta F5 y F6 sobre el codigo actual");
+            return;
+        }
+        ResultadoSemantico resultado = FisioSemanticRunner.analizar(
+            new ResultadoLexico(tokensAnalizados, erroresLexicosAnalizados), sintaxisActual);
+        panelSemantico.poblar(resultado);
+        if (!resultado.analizado()) {
+            lblEstado.setText("Semantica bloqueada: hay errores previos");
+            return;
+        }
+        editor.aplicarResaltadoSemantico(tokensAnalizados, resultado.errores());
+        lblEstado.setText("Semantica: " + resultado.errores().size() + " error(es)");
+    }
+
+    private void invalidarSemantica() {
+        sintaxisActual = null;
+        codigoAnalizadoSintactico = null;
+        panelSemantico.limpiar();
     }
 
     /**
@@ -638,6 +680,7 @@ public final class VentanaPrincipal extends JFrame {
     }
 
     private void limpiarResultadosConEstado(String textoEstado) {
+        invalidarSemantica();
         codigoAnalizadoLexico = null;
         tokensAnalizados = List.of();
         erroresLexicosAnalizados = List.of();

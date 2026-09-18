@@ -14,6 +14,7 @@ import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
 
 import fisio.analysis.ErrorSintactico;
+import fisio.ast.NodoAST;
 import fisio.ast.NodoPrograma;
 
 public final class PanelSintactico extends JPanel {
@@ -91,7 +92,7 @@ public final class PanelSintactico extends JPanel {
         }
     }
 
-    // Método mágico con Reflexión para recorrer cualquier nodo sin importar sus getters
+    // Recorrer solo nodos y listas; tokens y valores escalares son hojas.
     private void recorrerYValidar(Object obj, StyledDocument doc) throws BadLocationException {
         if (obj == null) return;
         
@@ -102,6 +103,8 @@ public final class PanelSintactico extends JPanel {
             }
             return;
         }
+
+        if (!(obj instanceof NodoAST)) return;
 
         // Checar a qué estructura pertenece
         String clase = obj.getClass().getSimpleName();

@@ -1,5 +1,84 @@
 # FISIO JavaCC
 
+## Análisis semántico actual (Rust-like)
+
+La gramática activa es el subconjunto Rust-like de `FISIO.jj`. El nuevo paquete
+`fisio.semantic` valida su AST sin ejecutar el programa. Las secciones históricas
+posteriores describen principalmente el FISIO original de física, no toda la
+gramática actual.
+
+En la GUI: **F5 → F6 → F7**. La pestaña **Semántica** incluye el botón
+**Analizar semántica [F7]**, mensajes con línea/columna y códigos de error.
+F7 exige análisis léxico y sintáctico sin errores del mismo texto; editar,
+abrir, limpiar o cambiar de ejemplo invalida el resultado. Una fase bloqueada
+no se muestra como un análisis exitoso.
+
+Reglas implementadas:
+
+- Ámbitos de función/bloque, uso antes de declarar y nombres inexistentes.
+  Se permite volver a declarar con `let` (shadowing, como en Rust); se rechazan
+  funciones y parámetros duplicados. El inicializador se resuelve antes de
+  introducir el nuevo nombre. `_` descarta el enlace y no es una variable.
+- Mutabilidad: asignación simple/compuesta exige `let mut`. Parámetros y
+  variables de iteración son inmutables en la gramática actual.
+- Tipos: `i8/i16/i32/i64/i128/isize`, `u8/u16/u32/u64/u128/usize`, `f32/f64`,
+  `bool` y `String`. `isize/usize` se comprueban con 64 bits en este modelo.
+  Sin anotación, los literales numéricos usan `i32/f64`; una anotación, llamada
+  u operando tipado puede contextualizar un literal de la misma familia.
+  No hay conversiones implícitas entre tipos ni inferencia global posterior.
+  Se verifican los límites de literales numéricos.
+- Operadores aritméticos y compuestos: operandos numéricos del mismo tipo.
+  `&&/||/!` requieren booleanos; `-` admite números con signo y decimales.
+  Igualdad entre tipos compatibles y orden entre números o cadenas.
+- Condiciones `if/while` booleanas. `for` requiere un rango de enteros del
+  mismo tipo y limita el ámbito de su variable al cuerpo.
+- Firmas registradas antes de recorrer cuerpos: llamadas adelantadas y
+  recursión, existencia, número/tipo de argumentos, retornos explícitos,
+  expresión final y compatibilidad de ramas. Sin `->`, el retorno es `()`.
+  No se exige `main`: también pueden analizarse archivos de funciones.
+- `println!`: formato literal, marcadores `{}`, escapes de llaves `{{/}}`,
+  cantidad de valores y tipos imprimibles (números, booleanos y cadenas).
+  `println!()` es válido. Otras macros y formatos avanzados se diagnostican
+  como no soportados. Una llamada `println(...)` es una función normal y
+  debe estar declarada.
+- División/resto por cero cuando el divisor es una expresión constante
+  reconocida (literales, agrupación, negación, suma, resta y multiplicación).
+  Se acumulan errores independientes y se evitan cascadas de tipos desconocidos.
+
+Ejemplo: `let mut contador = 0; contador += "hola";` produce `OPERADOR` por
+incompatibilidad `i32/String`. Con `contador += texto;` también se comprueba
+que `texto` exista. `contador += ;` sigue siendo un error **sintáctico** y
+bloquea F7 hasta corregirlo.
+
+API sin GUI: `FisioSemanticRunner.analizar(String)` devuelve
+`ResultadoSemantico` (`analizado`, `errores`, `motivo`, `exitoso()`). La
+sobrecarga con resultados previos requiere que pertenezcan al mismo texto.
+
+No es el compilador Rust: no implementa ownership, borrowing, traits,
+inferencia global, evaluación de variables ni detección de todos los errores
+en ejecución (por ejemplo, división por una variable que llegue a cero u
+overflow de operaciones). Usa las estructuras que conserva el AST actual;
+este todavía no distingue la inclusividad de `..` frente a `..=`.
+Los ejemplos anteriores solo sintácticos pueden ahora generar errores
+semánticos reales: el inicial usa un entero como iterable, y el de negativos
+mezcla `f64` con `i32`. No se alteraron para ocultar esos diagnósticos.
+
+Pruebas sin dependencias nuevas, desde PowerShell:
+
+```powershell
+.\scripts\test-semantico.ps1
+```
+
+El script ejecuta `test-compile` y la suite Java con comprobaciones explícitas,
+incluida la integración Swing. También puede ejecutarse sin probar ventanas:
+
+```powershell
+.\mvnw.cmd test-compile
+java -Djava.awt.headless=true -cp "target/classes;target/test-classes" fisio.semantic.SemanticRegression
+```
+
+`mvn test` por sí solo no ejecuta esta suite `main`; usar el script anterior.
+
 ## Descripción
 
 FISIO es un lenguaje de dominio específico orientado a describir problemas y
@@ -49,7 +128,7 @@ analizador manual, cubriendo:
 
 **NO implementado (fuera de alcance de este proyecto):**
 
-- análisis semántico;
+- semántica completa de Rust (ver el módulo del subconjunto descrito arriba);
 - intérprete o ejecución real del programa;
 - simulación física real (los comandos `mru`, `mrua`, `caida`, `parabolico`,
   `graficar`, `simular`, `despejar`, etc. se reconocen y validan
@@ -266,8 +345,7 @@ en una sola entrada, y el caso de fin de archivo inesperado (EOF).
 
 ## Limitaciones
 
-- No hay análisis semántico (no se valida el uso correcto de variables más
-  allá de la sintaxis).
+- El análisis semántico cubre el subconjunto documentado arriba, no Rust completo.
 - No hay intérprete: el código no se ejecuta.
 - No hay simulación física real ni cálculos numéricos de los comandos
   (`mru`, `mrua`, `caida`, `parabolico`, etc.).
