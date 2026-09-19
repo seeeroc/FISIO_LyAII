@@ -7,11 +7,21 @@ La gramática activa es el subconjunto Rust-like de `FISIO.jj`. El nuevo paquete
 posteriores describen principalmente el FISIO original de física, no toda la
 gramática actual.
 
-En la GUI: **F5 → F6 → F7**. La pestaña **Semántica** incluye el botón
-**Analizar semántica [F7]**, mensajes con línea/columna y códigos de error.
-F7 exige análisis léxico y sintáctico sin errores del mismo texto; editar,
-abrir, limpiar o cambiar de ejemplo invalida el resultado. Una fase bloqueada
-no se muestra como un análisis exitoso.
+En la GUI, **Ejecutar [F5]** realiza léxico → sintáctico → semántico sobre
+una instantánea del editor. Una fase con errores bloquea las siguientes.
+La navegación lateral permite abrir Tokens, Resumen, Alfabeto FISIO, Alfabeto Rust, Léxico,
+Sintáctico y Semántico en cualquier momento, sin repetir análisis.
+**F6** abre Sintáctico y **F7** abre Semántico. Los módulos muestran estado,
+mensajes y resultados; no contienen botones de análisis propios.
+
+Editar marca las vistas como **desactualizadas** y oculta su contenido anterior;
+abrir, limpiar o cargar un ejemplo restablece el estado **no ejecutado**.
+El análisis usa `SwingWorker`; un resultado de un documento anterior no se
+publica sobre el código nuevo. Alfabeto siempre está disponible.
+Las marcas rojas del editor corresponden únicamente al módulo Léxico, Sintáctico
+o Semántico seleccionado. Tokens, Resumen y los alfabetos no muestran marcas de error.
+El módulo Sintáctico conserva el checklist y muestra también el AST completo
+o parcial. Semántico presenta los diagnósticos existentes con línea/columna.
 
 Reglas implementadas:
 
@@ -48,7 +58,7 @@ Reglas implementadas:
 Ejemplo: `let mut contador = 0; contador += "hola";` produce `OPERADOR` por
 incompatibilidad `i32/String`. Con `contador += texto;` también se comprueba
 que `texto` exista. `contador += ;` sigue siendo un error **sintáctico** y
-bloquea F7 hasta corregirlo.
+bloquea la fase semántica hasta corregirlo.
 
 API sin GUI: `FisioSemanticRunner.analizar(String)` devuelve
 `ResultadoSemantico` (`analizado`, `errores`, `motivo`, `exitoso()`). La

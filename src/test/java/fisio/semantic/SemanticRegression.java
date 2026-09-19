@@ -2,18 +2,9 @@ package fisio.semantic;
 
 import fisio.analysis.FisioLexerRunner;
 import fisio.analysis.FisioParserRunner;
-import fisio.gui.EditorCodigoPanel;
 import fisio.gui.EjemplosFisio;
-import fisio.gui.VentanaPrincipal;
-import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
-import javax.swing.JButton;
-import javax.swing.JLabel;
-import javax.swing.JTabbedPane;
-import javax.swing.JTextArea;
-import javax.swing.SwingUtilities;
 
 /** Regresion ejecutable sin dependencias externas; falla con exit code no cero. */
 public final class SemanticRegression {
@@ -155,50 +146,7 @@ public final class SemanticRegression {
         System.out.println("PASS: " + casos + " casos semanticos");
     }
 
-    private static Object campo(Object objeto, String nombre) throws Exception {
-        Field campo = objeto.getClass().getDeclaredField(nombre);
-        campo.setAccessible(true);
-        return campo.get(objeto);
-    }
-    private static void accion(VentanaPrincipal v, String nombre) {
-        v.getRootPane().getActionMap().get(nombre).actionPerformed(null);
-    }
     private static void probarGui() throws Exception {
-        AtomicReference<VentanaPrincipal> ref = new AtomicReference<>();
-        SwingUtilities.invokeAndWait(() -> ref.set(new VentanaPrincipal()));
-        VentanaPrincipal v = ref.get();
-        try {
-            EditorCodigoPanel editor = (EditorCodigoPanel) campo(v, "editor");
-            Object panel = campo(v, "panelSemantico");
-            JTextArea texto = (JTextArea) campo(panel, "texto");
-            JButton boton = (JButton) campo(panel, "analizar");
-            SwingUtilities.invokeAndWait(() -> editor.setCodigo(programa("let mut contador = 0; contador += \"hola\";")));
-            SwingUtilities.invokeAndWait(() -> {
-                accion(v, "analizarLexico"); accion(v, "analizarSintactico");
-                if (!boton.isEnabled()) throw new AssertionError("F7 no habilitado");
-                accion(v, "analizarSemantico");
-                if (!texto.getText().contains("OPERADOR")) throw new AssertionError(texto.getText());
-                try {
-                    if (((JTabbedPane) campo(v, "tabs")).getSelectedComponent() != panel) throw new AssertionError("Tab incorrecta");
-                    if (!((JLabel) campo(v, "lblEstado")).getText().equals("Semantica: 1 error(es)")) throw new AssertionError("Estado incorrecto");
-                } catch (Exception e) { throw new AssertionError(e); }
-            });
-            SwingUtilities.invokeAndWait(() -> editor.setCodigo(programa("let mut contador = 0; contador += 1;")));
-            SwingUtilities.invokeAndWait(() -> {
-                if (boton.isEnabled() || texto.getText().contains("OPERADOR")) throw new AssertionError("Resultados obsoletos");
-                accion(v, "analizarSemantico");
-                if (texto.getText().contains("0 error(es)")) throw new AssertionError("Falso exito sin F5/F6");
-                accion(v, "analizarLexico"); accion(v, "analizarSintactico"); accion(v, "analizarSemantico");
-                if (!texto.getText().contains("0 error(es)")) throw new AssertionError(texto.getText());
-            });
-            SwingUtilities.invokeAndWait(() -> editor.setCodigo(programa("contador += ;")));
-            SwingUtilities.invokeAndWait(() -> {
-                accion(v, "analizarLexico"); accion(v, "analizarSintactico");
-                if (boton.isEnabled()) throw new AssertionError("F7 habilitado con error sintactico");
-                accion(v, "analizarSemantico");
-                if (!texto.getText().contains("NO REALIZADO")) throw new AssertionError(texto.getText());
-            });
-            System.out.println("GUI PASS: F5/F6/F7, errores, exito, bloqueo e invalidacion");
-        } finally { SwingUtilities.invokeAndWait(v::dispose); }
+        fisio.gui.GuiRegression.main(new String[0]);
     }
 }

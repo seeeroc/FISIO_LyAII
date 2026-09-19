@@ -2,20 +2,13 @@ package fisio.gui;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
-import java.awt.Component;
-import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
-import java.awt.Insets;
 import java.util.List;
 
 import javax.swing.BorderFactory;
-import javax.swing.BoxLayout;
-import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JEditorPane;
 import javax.swing.JScrollPane;
-import javax.swing.JTextArea;
 
 import fisio.token.CategoriaToken;
 
@@ -98,8 +91,8 @@ public final class PanelAlfabeto extends JPanel {
        o cambia un token en FISIO.jj, esta lista debe actualizarse para
        seguir siendo exacta. No reemplaza ni borra PALABRAS_RESERVADAS /
        OPERADORES_MATEMATICOS / OPERADORES_RELACIONALES / SIGNOS de arriba
-       (alfabeto FISIO original, seccion A): son dos alfabetos distintos que
-       conviven en el mismo panel, en secciones separadas.
+       (alfabeto FISIO original, seccion A): cada versión se presenta en
+       su propio módulo de referencia.
        ====================================================================== */
     private static final List<Entrada> PALABRAS_RESERVADAS_RUST = List.of(
         new Entrada("fn", CategoriaToken.PR, "PR_01"),
@@ -124,7 +117,13 @@ public final class PanelAlfabeto extends JPanel {
         new Entrada("type", CategoriaToken.PR, "PR_20"),
         new Entrada("const", CategoriaToken.PR, "PR_21"),
         new Entrada("static", CategoriaToken.PR, "PR_22"),
-        new Entrada("as", CategoriaToken.PR, "PR_23")
+        new Entrada("as", CategoriaToken.PR, "PR_23"),
+        new Entrada("mod", CategoriaToken.PR, "PR_24"),
+        new Entrada("break", CategoriaToken.PR, "PR_25"),
+        new Entrada("continue", CategoriaToken.PR, "PR_26"),
+        new Entrada("where", CategoriaToken.PR, "PR_27"),
+        new Entrada("ref", CategoriaToken.PR, "PR_28"),
+        new Entrada("unsafe", CategoriaToken.PR, "PR_29")
     );
 
     private static final List<Entrada> OPERADORES_MATEMATICOS_RUST = List.of(
@@ -159,11 +158,17 @@ public final class PanelAlfabeto extends JPanel {
         new Entrada("-=", CategoriaToken.SIG, "SIG_22"),
         new Entrada("*=", CategoriaToken.SIG, "SIG_23"),
         new Entrada("/=", CategoriaToken.SIG, "SIG_24"),
-        new Entrada("%=", CategoriaToken.SIG, "SIG_25")
+        new Entrada("%=", CategoriaToken.SIG, "SIG_25"),
+        new Entrada("<<=", CategoriaToken.SIG, "SIG_27"),
+        new Entrada(">>=", CategoriaToken.SIG, "SIG_28"),
+        new Entrada("&=", CategoriaToken.SIG, "SIG_29"),
+        new Entrada("|=", CategoriaToken.SIG, "SIG_30"),
+        new Entrada("^=", CategoriaToken.SIG, "SIG_31")
     );
 
     private static final List<Entrada> RANGO_RUST = List.of(
-        new Entrada("..", CategoriaToken.SIG, "SIG_26")
+        new Entrada("..", CategoriaToken.SIG, "SIG_26"),
+        new Entrada("..=", CategoriaToken.SIG, "SIG_32")
     );
 
     // Sin ASIGNACION/AND/OR/NEGACION/PUNTO (ya cubiertos en sus propias
@@ -183,64 +188,54 @@ public final class PanelAlfabeto extends JPanel {
         new Entrada("|", CategoriaToken.SIG, "SIG_14"),
         new Entrada("->", CategoriaToken.SIG, "SIG_16"),
         new Entrada("=>", CategoriaToken.SIG, "SIG_17"),
-        new Entrada("::", CategoriaToken.SIG, "SIG_18")
+        new Entrada("::", CategoriaToken.SIG, "SIG_18"),
+        new Entrada("<<", CategoriaToken.SIG, "SIG_33"),
+        new Entrada(">>", CategoriaToken.SIG, "SIG_34"),
+        new Entrada("^", CategoriaToken.SIG, "SIG_35"),
+        new Entrada("@", CategoriaToken.SIG, "SIG_36"),
+        new Entrada("#", CategoriaToken.SIG, "SIG_37"),
+        new Entrada("?", CategoriaToken.SIG, "SIG_38")
     );
 
-    private final JPanel contenido;
+    public enum Version { FISIO, RUST }
+    private final StringBuilder contenido = new StringBuilder();
+    private final JEditorPane documento = new JEditorPane();
 
-    public PanelAlfabeto() {
+    public PanelAlfabeto(Version version) {
         super(new BorderLayout());
         setBackground(TemaFisio.BG_PANEL);
-
-        contenido = new JPanel();
-        contenido.setBackground(TemaFisio.BG_PANEL);
-        contenido.setLayout(new BoxLayout(contenido, BoxLayout.Y_AXIS));
-        contenido.setBorder(BorderFactory.createEmptyBorder(8, 0, 12, 0));
-
-        poblarInformacion();
-
-        JScrollPane scroll = new JScrollPane(contenido);
-        scroll.getViewport().setBackground(TemaFisio.BG_PANEL);
-        scroll.setBorder(BorderFactory.createEmptyBorder());
-        scroll.getVerticalScrollBar().setUnitIncrement(16);
-        add(scroll, BorderLayout.CENTER);
-    }
-
-    /**
-     * Revision general Rust-like: esta tab siempre mostro el alfabeto del
-     * FISIO original (fisica); la gramatica REAL que analizan F5/F6 hoy es
-     * otra (subconjunto Rust-like, FISIO.jj). En vez de reemplazar el
-     * contenido original (que no se borra, sigue integro en
-     * poblarSeccionFisioOriginal()) se agrega una segunda seccion con el
-     * alfabeto REAL actual. "Tipos de Token" queda al final porque describe
-     * las categorias (PR/OPM/OPR/SIG/ID/NUM/ERROR) de forma generica --
-     * aplica igual a ambos alfabetos, no es especifico de ninguno.
-     */
-    private void poblarInformacion() {
-        poblarSeccionFisioOriginal();
+        contenido.append("<html><head><style>body { font-family: sans-serif; font-size: 12pt; color: #cdd6f4; }")
+            .append("h2 { font-size: 14pt; color: #89b4fa; } td, th { padding: 5px; text-align: left; }")
+            .append("th { color: #89b4fa; } table { width: 100%; } </style></head><body>");
+        if (version == Version.FISIO) poblarSeccionFisioOriginal();
+        else poblarSeccionRustLike();
         agregarSeparador();
-        poblarSeccionRustLike();
-        agregarSeparador();
-
-        agregarTitulo("Tipos de Token (categorías compartidas)", 12);
+        agregarTitulo("Categorías de tokens", 12);
         agregarTablaTipos(List.of(
-            new FilaTipo("PR", "Palabra Reservada", TemaFisio.COL_PR),
-            new FilaTipo("OPM", "Operador Matemático", TemaFisio.COL_OPM),
-            new FilaTipo("OPR", "Operador Relacional", TemaFisio.COL_OPR),
+            new FilaTipo("PR", "Palabra reservada", TemaFisio.COL_PR),
+            new FilaTipo("OPM", "Operador matemático", TemaFisio.COL_OPM),
+            new FilaTipo("OPR", "Operador relacional", TemaFisio.COL_OPR),
             new FilaTipo("SIG", "Signo", TemaFisio.COL_SIG),
             new FilaTipo("ID", "Identificador", TemaFisio.COL_ID),
             new FilaTipo("NUM", "Número", TemaFisio.COL_NUM),
-            new FilaTipo("STRING", "Cadena de texto", TemaFisio.COL_STRING),
-            // Color hardcodeado tal cual en gui.py (difiere ligeramente de
-            // COL_ERROR "#f38ba8"; se reproduce fielmente la inconsistencia
-            // original en vez de "corregirla" por iniciativa propia).
-            new FilaTipo("ERROR", "Token inválido", Color.decode("#ff5555"))
+            new FilaTipo("ERROR", "Token inválido", TemaFisio.COL_ERROR)
         ));
+        contenido.append("</body></html>");
+        documento.setContentType("text/html");
+        documento.setEditable(false);
+        documento.setBackground(TemaFisio.BG_PANEL);
+        documento.setBorder(BorderFactory.createEmptyBorder(0, 8, 8, 8));
+        documento.setText(contenido.toString());
+        documento.setCaretPosition(0);
+        JScrollPane scroll = new JScrollPane(documento);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.getVerticalScrollBar().setUnitIncrement(20);
+        add(scroll, BorderLayout.CENTER);
     }
 
     /** SECCION A (sin cambios de contenido, solo el titulo aclara que es la version anterior). */
     private void poblarSeccionFisioOriginal() {
-        agregarTitulo("ALFABETO FISIO ORIGINAL (lenguaje de física — versión anterior)", 13);
+        agregarTitulo("FISIO original · Lenguaje de física", 13);
         agregarSeparador();
 
         agregarTexto(
@@ -279,7 +274,7 @@ public final class PanelAlfabeto extends JPanel {
 
     /** SECCION B (nueva): alfabeto de la gramática Rust-like REAL (FISIO.jj actual). */
     private void poblarSeccionRustLike() {
-        agregarTitulo("ALFABETO RUST-LIKE / FASE 2 (gramática actual, FISIO.jj)", 13);
+        agregarTitulo("Rust-like · Gramática actual", 13);
         agregarSeparador();
 
         agregarTexto(
@@ -288,7 +283,7 @@ public final class PanelAlfabeto extends JPanel {
           + "(||, &&, ==/!=, relacionales, +/-, */%, unario -/!), llamadas a función, "
           + "macros mínimas tipo println!(...) y rangos (a..b). Sin ownership, "
           + "borrowing, lifetimes, genéricos, traits reales, match, módulos ni "
-          + "ejecución real -- solo reconocimiento léxico/sintáctico + AST.",
+          + "ejecución real. Esta referencia incluye tokens reconocidos por el lexer; no todos tienen soporte sintáctico o semántico.",
             TemaFisio.fuenteUi(Font.PLAIN, 10));
         agregarSeparador();
 
@@ -338,142 +333,27 @@ public final class PanelAlfabeto extends JPanel {
     }
 
     private void agregarTitulo(String texto, int tamano) {
-        JLabel lbl = new JLabel(texto);
-        lbl.setForeground(TemaFisio.ACCENT);
-        lbl.setFont(TemaFisio.fuenteUi(Font.BOLD, tamano));
-        lbl.setAlignmentX(Component.LEFT_ALIGNMENT);
-        lbl.setBorder(BorderFactory.createEmptyBorder(16, 20, 4, 0));
-        contenido.add(lbl);
+        contenido.append("<h2>").append(escapar(texto)).append("</h2>");
     }
-
-    private void agregarSeparador() {
-        JPanel linea = new JPanel();
-        linea.setBackground(TemaFisio.BORDER);
-        linea.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-        JPanel envoltura = new JPanel(new BorderLayout());
-        envoltura.setBackground(TemaFisio.BG_PANEL);
-        envoltura.setAlignmentX(Component.LEFT_ALIGNMENT);
-        envoltura.setBorder(BorderFactory.createEmptyBorder(6, 20, 6, 20));
-        envoltura.add(linea, BorderLayout.CENTER);
-        envoltura.setMaximumSize(new Dimension(Short.MAX_VALUE, 13));
-        envoltura.setPreferredSize(new Dimension(10, 13));
-        contenido.add(envoltura);
-    }
-
+    private void agregarSeparador() { contenido.append("<hr>"); }
     private void agregarTexto(String texto, Font fuente) {
-        JTextArea area = new JTextArea(texto);
-        area.setEditable(false);
-        area.setFocusable(false);
-        area.setOpaque(false);
-        area.setForeground(TemaFisio.FG_MAIN);
-        area.setFont(fuente);
-        area.setAlignmentX(Component.LEFT_ALIGNMENT);
-        area.setBorder(BorderFactory.createEmptyBorder(4, 20, 8, 0));
-        contenido.add(area);
+        contenido.append("<p>").append(escapar(texto).replace("\n", "<br>")).append("</p>");
     }
-
-    /**
-     * Tabla de 3 columnas (Lexema / Tipo / ID Token) para una seccion
-     * completa (Palabras Reservadas, Operadores, Signos). Se usa un unico
-     * GridBagLayout por seccion (no un JPanel por fila) para que las 3
-     * columnas queden realmente alineadas entre filas — evita el problema
-     * observado en ejecucion real (texto concatenado sin separacion) que
-     * ocurria al fijar anchos con setPreferredSize dentro de BoxLayout.
-     */
     private void agregarTablaItems(List<Entrada> entradas, Color color) {
-        JPanel tabla = new JPanel(new GridBagLayout());
-        tabla.setBackground(TemaFisio.BG_PANEL);
-        tabla.setAlignmentX(Component.LEFT_ALIGNMENT);
-        tabla.setBorder(BorderFactory.createEmptyBorder(4, 30, 2, 0));
-
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.anchor = GridBagConstraints.WEST;
-
-        gbc.gridy = 0;
-        gbc.gridx = 0;
-        gbc.insets = new Insets(0, 0, 6, 24);
-        tabla.add(crearEncabezadoColumna("Lexema"), gbc);
-        gbc.gridx = 1;
-        tabla.add(crearEncabezadoColumna("Tipo"), gbc);
-        gbc.gridx = 2;
-        gbc.insets = new Insets(0, 0, 6, 0);
-        tabla.add(crearEncabezadoColumna("ID Token"), gbc);
-
-        int fila = 1;
-        for (Entrada e : entradas) {
-            gbc.gridy = fila;
-
-            gbc.gridx = 0;
-            gbc.insets = new Insets(2, 0, 2, 24);
-            JLabel lblLexema = new JLabel(e.lexema());
-            lblLexema.setForeground(color);
-            lblLexema.setFont(TemaFisio.fuenteMono(Font.BOLD, 10));
-            tabla.add(lblLexema, gbc);
-
-            gbc.gridx = 1;
-            JLabel lblTipo = new JLabel(e.tipo().name());
-            lblTipo.setForeground(TemaFisio.FG_MAIN);
-            lblTipo.setFont(TemaFisio.fuenteMono(Font.PLAIN, 9));
-            tabla.add(lblTipo, gbc);
-
-            gbc.gridx = 2;
-            gbc.insets = new Insets(2, 0, 2, 0);
-            JLabel lblId = new JLabel(e.idFisio());
-            lblId.setForeground(TemaFisio.FG_DIM);
-            lblId.setFont(TemaFisio.fuenteMono(Font.PLAIN, 9));
-            tabla.add(lblId, gbc);
-
-            fila++;
+        contenido.append("<table cellspacing='0'><tr><th>Lexema</th><th>Tipo</th><th>ID Token</th></tr>");
+        for (Entrada entrada : entradas) {
+            contenido.append("<tr><td>").append(escapar(entrada.lexema())).append("</td><td>")
+                .append(entrada.tipo().name()).append("</td><td>").append(entrada.idFisio()).append("</td></tr>");
         }
-        contenido.add(tabla);
+        contenido.append("</table>");
     }
-
-    /** Tabla de 2 columnas (Tipo / Descripcion) para la seccion "Tipos de Token". */
     private void agregarTablaTipos(List<FilaTipo> filas) {
-        JPanel tabla = new JPanel(new GridBagLayout());
-        tabla.setBackground(TemaFisio.BG_PANEL);
-        tabla.setAlignmentX(Component.LEFT_ALIGNMENT);
-        tabla.setBorder(BorderFactory.createEmptyBorder(4, 30, 2, 0));
-
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.anchor = GridBagConstraints.WEST;
-
-        gbc.gridy = 0;
-        gbc.gridx = 0;
-        gbc.insets = new Insets(0, 0, 6, 24);
-        tabla.add(crearEncabezadoColumna("Tipo"), gbc);
-        gbc.gridx = 1;
-        gbc.insets = new Insets(0, 0, 6, 0);
-        tabla.add(crearEncabezadoColumna("Descripción"), gbc);
-
-        int fila = 1;
-        for (FilaTipo f : filas) {
-            gbc.gridy = fila;
-
-            gbc.gridx = 0;
-            gbc.insets = new Insets(2, 0, 2, 24);
-            JLabel lblSigla = new JLabel(f.sigla());
-            lblSigla.setForeground(f.color());
-            lblSigla.setFont(TemaFisio.fuenteMono(Font.BOLD, 10));
-            tabla.add(lblSigla, gbc);
-
-            gbc.gridx = 1;
-            gbc.insets = new Insets(2, 0, 2, 0);
-            JLabel lblDesc = new JLabel(f.descripcion());
-            lblDesc.setForeground(TemaFisio.FG_MAIN);
-            lblDesc.setFont(TemaFisio.fuenteUi(Font.PLAIN, 9));
-            tabla.add(lblDesc, gbc);
-
-            fila++;
-        }
-        contenido.add(tabla);
+        contenido.append("<table cellspacing='0'><tr><th>Tipo</th><th>Descripción</th></tr>");
+        for (FilaTipo fila : filas) contenido.append("<tr><td>").append(escapar(fila.sigla()))
+            .append("</td><td>").append(escapar(fila.descripcion())).append("</td></tr>");
+        contenido.append("</table>");
     }
-
-    private JLabel crearEncabezadoColumna(String texto) {
-        JLabel lbl = new JLabel(texto);
-        lbl.setForeground(TemaFisio.FG_DIM);
-        lbl.setFont(TemaFisio.fuenteUi(Font.BOLD, 9));
-        return lbl;
+    private static String escapar(String texto) {
+        return texto.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 }

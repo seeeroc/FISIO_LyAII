@@ -84,8 +84,11 @@ public final class PanelSintactico extends JPanel {
                 doc.insertString(doc.getLength(), "Estructuras validadas exitosamente:\n", estiloTitulo);
             }
 
-            // 2. Recorrer el AST para imprimir el checklist en lugar del árbol
+            // 2. Conservar el checklist y mostrar también el árbol completo o recuperado.
             recorrerYValidar(ast, doc);
+            doc.insertString(doc.getLength(), errores.isEmpty() ? "\nAST\n" : "\nAST parcial recuperado\n", estiloTitulo);
+            doc.insertString(doc.getLength(), String.join("\n", FormateadorAst.formatear(ast)), estiloDim);
+            texto.setCaretPosition(0);
 
         } catch (BadLocationException e) {
             throw new AssertionError(e);
