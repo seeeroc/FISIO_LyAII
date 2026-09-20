@@ -24,7 +24,7 @@ final class AnalizadorSemantico {
         boolean decimal() { return nombre.equals("f32") || nombre.equals("f64"); }
         boolean numerico() { return entero() || decimal(); }
         boolean rango() { return elemento != null; }
-        @Override public String toString() { return rango() ? "rango<" + elemento + ">" : nombre; }
+        @Override public String toString() { return rango() ? nombre + "<" + elemento + ">" : nombre; }
     }
     private record Variable(Tipo tipo, boolean mutable) {}
     private record Firma(List<Tipo> parametros, Tipo retorno) {}
@@ -40,6 +40,7 @@ final class AnalizadorSemantico {
     private final Map<NodoFuncion, Firma> firmas = new IdentityHashMap<>();
     private final Deque<Map<String, Variable>> ambitos = new ArrayDeque<>();
     private Tipo retornoActual;
+    private final Map<NodoAST, Tipo> tiposExpresion = new IdentityHashMap<>();
 
     ResultadoSemantico analizar(NodoPrograma programa) {
         for (NodoAST nodo : programa.sentencias()) {
@@ -68,7 +69,7 @@ final class AnalizadorSemantico {
                 }
             }
             Tipo cuerpo = bloque(f.cuerpo(), retornoActual);
-            exigir(f, retornoActual, cuerpo, "RETORNO", "Retorno de '" + f.nombre().lexema() + "'");
+            comprobarRetorno(f, cuerpo, false, "Retorno de '" + f.nombre().lexema() + "'");
             ambitos.pop();
         }
         return new ResultadoSemantico(true, errores, "");
@@ -125,22 +126,28 @@ final class AnalizadorSemantico {
                 return UNIDAD;
             }
             String nombre = id.token().lexema();
+            if (nombre.equals("_")) {
+                expresion(n.expresion(), null);
+                if (!n.operador().lexema().equals("="))
+                    error(n, "DESTINO", "El descarte '_' solo admite asignacion simple; no almacena un valor.");
+                return UNIDAD;
+            }
             Variable variable = buscar(nombre);
             Tipo valor = expresion(n.expresion(), variable == null ? null : variable.tipo());
-            if (variable == null) error(id, "VARIABLE_NO_DECLARADA", "Variable no declarada: '" + nombre + "'.");
+            if (variable == null) error(id, "VARIABLE_NO_DECLARADA", "La variable '" + nombre + "' no está declarada en este ámbito o no es accesible desde él.");
             else {
                 if (!variable.mutable()) error(n, "INMUTABLE", "No se puede modificar '" + nombre + "': se declaro sin 'mut'.");
                 if (n.operador().lexema().equals("=")) exigir(n, variable.tipo(), valor, "TIPO", "Asignacion a '" + nombre + "'");
                 else {
-                    operador(n, n.operador().lexema(), variable.tipo(), valor);
-                    comprobarCero(n, n.operador().lexema(), n.expresion());
+                    Tipo resultado = operador(n, n.operador().lexema(), variable.tipo(), valor);
+                    if (!resultado.equals(ERROR)) comprobarCero(n, n.operador().lexema(), n.expresion());
                 }
             }
             return UNIDAD;
         }
         if (nodo instanceof NodoReturn n) {
             Tipo valor = n.expresion() == null ? UNIDAD : expresion(n.expresion(), retornoActual);
-            exigir(n, retornoActual, valor, "RETORNO", "Sentencia return");
+            comprobarRetorno(n, valor, n.expresion() == null, "Sentencia return");
             return NUNCA;
         }
         if (nodo instanceof NodoIf n) return condicional(n, esperado);
@@ -183,11 +190,17 @@ final class AnalizadorSemantico {
     }
 
     private Tipo expresion(NodoAST nodo, Tipo esperado) {
+        Tipo tipo = evaluarExpresion(nodo, esperado);
+        tiposExpresion.put(nodo, tipo);
+        return tipo;
+    }
+
+    private Tipo evaluarExpresion(NodoAST nodo, Tipo esperado) {
         if (nodo instanceof NodoNumero n) return literal(n, esperado, false);
         if (nodo instanceof NodoIdentificador n) {
             Variable variable = buscar(n.token().lexema());
             if (variable != null) return variable.tipo();
-            error(n, "VARIABLE_NO_DECLARADA", "Variable no declarada: '" + n.token().lexema() + "'.");
+            error(n, "VARIABLE_NO_DECLARADA", "La variable '" + n.token().lexema() + "' no está declarada en este ámbito o no es accesible desde él.");
             return ERROR;
         }
         if (nodo instanceof NodoAgrupacion n) return expresion(n.expresion(), esperado);
@@ -209,8 +222,9 @@ final class AnalizadorSemantico {
         if (nodo instanceof NodoOperacion n) {
             Tipo contexto = n.operador().lexema().equals("&&") || n.operador().lexema().equals("||") ? BOOL : esperado;
             Tipo[] tipos = operandos(n.izquierda(), n.derecha(), contexto);
-            comprobarCero(n, n.operador().lexema(), n.derecha());
-            return operador(n, n.operador().lexema(), tipos[0], tipos[1]);
+            Tipo resultado = operador(n, n.operador().lexema(), tipos[0], tipos[1]);
+            if (!resultado.equals(ERROR)) comprobarCero(n, n.operador().lexema(), n.derecha());
+            return resultado;
         }
         if (nodo instanceof NodoOperacionRelacional n) {
             Tipo[] tipos = operandos(n.izquierda(), n.derecha(), null);
@@ -223,7 +237,7 @@ final class AnalizadorSemantico {
                 error(n, "RANGO", "Los extremos del rango deben ser enteros del mismo tipo; se encontro " + tipos[0] + " y " + tipos[1] + ".");
                 return ERROR;
             }
-            return new Tipo("rango", tipos[0]);
+            return new Tipo(n.inclusivo() ? "rango_inclusivo" : "rango", tipos[0]);
         }
         if (nodo instanceof NodoLlamadaFuncion n) return llamada(n);
         if (nodo instanceof NodoInvocacionMacro n) return macro(n);
@@ -346,24 +360,65 @@ final class AnalizadorSemantico {
         if (constante != null && constante.signum() == 0) error(nodo, "DIVISION_CERO", "Division o resto entre una expresion constante igual a cero.");
     }
 
-    /** Solo expresiones constantes: no simula variables, llamadas ni ciclos. */
+    /** Constantes puras, con truncamiento entero y redondeo del tipo decimal real.
+     * No evalúa variables ni llamadas, ni deduce valores después de overflow. */
     private BigDecimal constante(NodoAST nodo) {
-        if (nodo instanceof NodoNumero n && n.token().categoria() == CategoriaToken.NUM) return new BigDecimal(n.token().lexema());
-        if (nodo instanceof NodoAgrupacion n) return constante(n.expresion());
-        if (nodo instanceof NodoOperacionUnaria n && n.operador().lexema().equals("-")) { var v = constante(n.operando()); return v == null ? null : v.negate(); }
-        if (nodo instanceof NodoOperacion n) {
+        Tipo tipo = tiposExpresion.get(nodo);
+        if (tipo != null && !tipo.numerico()) return null;
+        BigDecimal valor = null;
+        if (nodo instanceof NodoNumero n && n.token().categoria() == CategoriaToken.NUM)
+            valor = new BigDecimal(n.token().lexema());
+        else if (nodo instanceof NodoAgrupacion n) valor = constante(n.expresion());
+        else if (nodo instanceof NodoOperacionUnaria n && n.operador().lexema().equals("-")) {
+            var v = constante(n.operando());
+            if (v != null) valor = v.negate();
+        } else if (nodo instanceof NodoOperacion n) {
             BigDecimal a = constante(n.izquierda()), b = constante(n.derecha());
-            if (a == null || b == null) return null;
-            return switch (n.operador().lexema()) {
-                case "+" -> a.add(b); case "-" -> a.subtract(b); case "*" -> a.multiply(b); default -> null;
+            if (a == null || b == null || tipo == null) return null;
+            String op = n.operador().lexema();
+            if ((op.equals("/") || op.equals("%")) && b.signum() == 0) return null;
+            if (tipo.decimal()) {
+                double resultado;
+                if (tipo.nombre().equals("f32")) {
+                    float x = a.floatValue(), y = b.floatValue();
+                    resultado = switch (op) { case "+" -> x + y; case "-" -> x - y;
+                        case "*" -> x * y; case "/" -> x / y; case "%" -> x % y; default -> Double.NaN; };
+                } else {
+                    double x = a.doubleValue(), y = b.doubleValue();
+                    resultado = switch (op) { case "+" -> x + y; case "-" -> x - y;
+                        case "*" -> x * y; case "/" -> x / y; case "%" -> x % y; default -> Double.NaN; };
+                }
+                return Double.isFinite(resultado) ? BigDecimal.valueOf(resultado) : null;
+            }
+            valor = switch (op) {
+                case "+" -> a.add(b); case "-" -> a.subtract(b); case "*" -> a.multiply(b);
+                case "/" -> a.divideToIntegralValue(b); case "%" -> a.remainder(b); default -> null;
             };
         }
-        return null;
+        if (valor == null || tipo == null) return valor;
+        if (tipo.decimal()) {
+            double redondeado = tipo.nombre().equals("f32") ? valor.floatValue() : valor.doubleValue();
+            return Double.isFinite(redondeado) ? BigDecimal.valueOf(redondeado) : null;
+        }
+        boolean unsigned = tipo.nombre().startsWith("u");
+        int bits = tipo.nombre().endsWith("size") ? 64 : Integer.parseInt(tipo.nombre().substring(1));
+        BigInteger max = BigInteger.ONE.shiftLeft(unsigned ? bits : bits - 1).subtract(BigInteger.ONE);
+        BigInteger min = unsigned ? BigInteger.ZERO : BigInteger.ONE.shiftLeft(bits - 1).negate();
+        return valor.compareTo(new BigDecimal(min)) < 0 || valor.compareTo(new BigDecimal(max)) > 0 ? null : valor;
     }
 
     private boolean esTrue(NodoAST nodo) {
         if (nodo instanceof NodoAgrupacion n) return esTrue(n.expresion());
         return nodo instanceof NodoNumero n && n.token().lexema().equals("true");
+    }
+
+    private void comprobarRetorno(NodoAST nodo, Tipo valor, boolean retornoVacio, String contexto) {
+        if (retornoActual.equals(ERROR) || valor.equals(ERROR) || valor.equals(NUNCA)) return;
+        if (retornoVacio && !retornoActual.equals(UNIDAD)) {
+            error(nodo, "RETORNO", "Se encontró un retorno vacío; la función debe devolver un valor de tipo " + retornoActual + ".");
+        } else if (retornoActual.equals(UNIDAD) && !valor.equals(UNIDAD)) {
+            error(nodo, "RETORNO", "La función no puede devolver un valor porque no tiene tipo de retorno declarado; se encontró " + valor + ".");
+        } else exigir(nodo, retornoActual, valor, "RETORNO", contexto);
     }
 
     private void exigir(NodoAST nodo, Tipo esperado, Tipo actual, String codigo, String contexto) {

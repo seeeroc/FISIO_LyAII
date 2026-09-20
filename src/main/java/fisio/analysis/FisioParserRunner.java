@@ -14,11 +14,12 @@ public final class FisioParserRunner {
     }
 
     public static ResultadoSintactico parse(String codigo) {
-        // Usamos FisioParser
+        // Cada ejecución conserva su propia recuperación y posiciones.
         FisioParser parser = new FisioParser(new StringReader(codigo));
 
+        parser.configurarFinFuente(codigo);
+
         try {
-            // Esto llamará a la regla sintáctica principal que agregaremos abajo
             NodoPrograma ast = parser.Programa();
             return new ResultadoSintactico(ast, parser.errores());
         } catch (ParseException | TokenMgrError e) {

@@ -148,6 +148,7 @@ public final class FormateadorAst {
                 hijosUnicos.add(n.expresionFinal());
             }
         } else if (nodo instanceof NodoRango n) {
+            detalles.add("operador='" + (n.inclusivo() ? "..=" : "..") + "'");
             etiquetasUnicas.add("inicio");
             hijosUnicos.add(n.inicio());
             etiquetasUnicas.add("fin");

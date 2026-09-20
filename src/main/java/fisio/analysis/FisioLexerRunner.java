@@ -1,60 +1,46 @@
 package fisio.analysis;
 
-import fisio.FisioParser; // Clase generada por JavaCC
-import fisio.Token;       // Token nativo generado por JavaCC
+import fisio.FisioParser;
+import fisio.FisioParserConstants;
+import fisio.TokenMgrError;
+import fisio.token.CategoriaToken;
+import fisio.token.ErrorLexico;
 import fisio.token.MapeoTokens;
-import fisio.token.TokenFisio; // Tu clase orientada a la GUI
+import fisio.token.TokenFisio;
 import java.io.StringReader;
 import java.util.ArrayList;
-import java.util.List;
-import fisio.token.ErrorLexico;
-import fisio.token.CategoriaToken;
+import java.util.Objects;
 
+/** Reconoce el subconjunto Rust-like y mantiene separados tokens y diagnósticos. */
+public final class FisioLexerRunner {
+    private FisioLexerRunner() {}
 
-
-public class FisioLexerRunner {
-    
-    // Cambiamos el nombre a "tokenize" y el retorno a "ResultadoLexico"
     public static ResultadoLexico tokenize(String codigoFuente) {
-        List<TokenFisio> listaTokens = new ArrayList<>();
-        List<ErrorLexico> listaErrores = new ArrayList<>();
-        
-        FisioParser parser = new FisioParser(new StringReader(codigoFuente));
-        
+        Objects.requireNonNull(codigoFuente, "codigoFuente");
+        var tokens = new ArrayList<TokenFisio>();
+        var errores = new ArrayList<ErrorLexico>();
+        var parser = new FisioParser(new StringReader(codigoFuente));
         try {
-            Token tokenJavaCC = parser.getNextToken();
-            
-            while (tokenJavaCC.kind != fisio.FisioParserConstants.EOF) {
-                
-                MapeoTokens.InfoToken info = MapeoTokens.obtenerInfo(tokenJavaCC.kind);
-                
-                // Separamos la lógica: si es un error, va a la lista de errores
+            while (true) {
+                var token = parser.getNextToken();
+                if (token.kind == FisioParserConstants.EOF) break;
+                var info = MapeoTokens.obtenerInfo(token.kind);
                 if (info.categoria == CategoriaToken.ERROR) {
-                    listaErrores.add(new ErrorLexico(
-                        tokenJavaCC.image, 
-                        "Caracter no reconocido", 
-                        tokenJavaCC.beginLine, 
-                        tokenJavaCC.beginColumn
-                    ));
+                    String mensaje = "Carácter no reconocido";
+                    if (token.kind == FisioParserConstants.CADENA_INVALIDA)
+                        mensaje = "Cadena sin cerrar o con escape no admitido";
+                    else if (token.kind == FisioParserConstants.NUMERO_INVALIDO)
+                        mensaje = "Número mal formado o formato numérico no admitido";
+                    errores.add(new ErrorLexico(token.image, mensaje, token.beginLine, token.beginColumn));
                 } else {
-                    // Si es válido, se empaqueta para la tabla de la GUI
-                    TokenFisio tokenParaGUI = new TokenFisio(
-                        tokenJavaCC.image,      
-                        info.categoria,         
-                        info.idTok,             
-                        tokenJavaCC.beginLine,  
-                        tokenJavaCC.beginColumn 
-                    );
-                    listaTokens.add(tokenParaGUI);
+                    tokens.add(new TokenFisio(token.image, info.categoria, info.idTok, token.beginLine, token.beginColumn));
                 }
-                
-                tokenJavaCC = parser.getNextToken();
             }
-        } catch (fisio.TokenMgrError | Exception e) {
-            e.printStackTrace();
+        } catch (TokenMgrError error) {
+            if (parser.token_source.profundidadComentario == 0) throw error;
+            errores.add(new ErrorLexico("/*", "Comentario de bloque sin cerrar",
+                parser.token_source.lineaComentario, parser.token_source.columnaComentario));
         }
-        
-        // Empaquetamos ambas listas en el objeto que espera la GUI
-        return new ResultadoLexico(listaTokens, listaErrores);
+        return new ResultadoLexico(tokens, errores);
     }
 }

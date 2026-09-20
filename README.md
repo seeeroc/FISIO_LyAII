@@ -1,5 +1,67 @@
 # FISIO JavaCC
 
+## Contrato léxico actual
+
+El lexer reconoce el subconjunto Rust-like del proyecto, no el lenguaje Rust
+completo. Los identificadores usan letras ASCII, `_` y dígitos después del primer
+carácter; las palabras reservadas distinguen mayúsculas y minúsculas. Los números
+son enteros decimales o decimales con dígitos a ambos lados del punto. El signo
+menos es un token independiente y `0..10` conserva el operador de rango.
+Bases, exponentes, separadores y sufijos numéricos todavía no se admiten:
+`0xff`, `1e3`, `1_000` y `5i32` producen un diagnóstico léxico.
+
+Las cadenas admiten contenido Unicode, saltos de línea y los escapes `\n`, `\r`,
+`\t`, `\0`, `\\`, `\"` y `\'`. Otros escapes se diagnostican como no admitidos.
+Las cadenas mal formadas producen errores separados de los tokens válidos.
+Los comentarios `//` llegan hasta el salto de línea o EOF; los comentarios
+`/* ... */` permiten anidamiento y deben cerrarse. Un comentario sin cerrar
+se informa en la posición de su apertura y bloquea las fases posteriores.
+
+Las posiciones usan líneas y columnas desde 1; cada tabulación cuenta como un
+carácter, igual que el editor. `ResultadoLexico` contiene listas inmutables de
+tokens válidos (sin EOF) y errores. Las excepciones internas no se ocultan como
+resultados exitosos. La referencia del alfabeto FISIO anterior es solo histórica;
+sus antiguos helpers sin consumidores fueron retirados del análisis activo.
+
+Pruebas léxicas (sin dependencias adicionales):
+
+```powershell
+.\mvnw.cmd test-compile
+java -cp "target/classes;target/test-classes" fisio.analysis.LexerRegression
+```
+
+## Contrato sintáctico actual
+
+El programa contiene funciones `fn` con parámetros `nombre: tipo`, retorno
+opcional `-> tipo` y bloques. Se admiten `let`/`let mut` con inicializador,
+asignaciones `=`, `+=`, `-=`, `*=`, `/=`, `%=`, `if`/`else if`/`else`,
+`while`, `for ... in`, `loop`, `return`, llamadas y macros con paréntesis.
+Las expresiones admiten literales, identificadores, agrupación, unarios,
+operadores aritméticos, comparaciones, lógica y rangos con ambos extremos.
+
+Una expresión seguida de `;` es una sentencia; sin `;` debe ser el último
+valor antes de `}`. El AST conserva ambas formas sin sobrescribir expresiones
+anteriores. La precedencia va de unarios y multiplicativos a aditivos,
+relacionales, igualdad, `&&`, `||` y rangos. El AST distingue `..` de `..=`.
+
+Los errores recuperables se acumulan con línea y columna. Se conservan las
+funciones posteriores a una cabecera dañada o una llave ausente, y las
+sentencias inequívocas posteriores a un punto y coma ausente. El AST parcial
+no se envía a semántica mientras existan errores. `FisioParserRunner.parse`
+se usa sobre código léxicamente válido; el pipeline comprueba esta condición.
+
+No es la sintaxis completa de Rust: no se incorporan structs, match, impl,
+arrays, accesos a miembros, closures, préstamos, tipos compuestos, break ni
+continue. Las comas finales en parámetros y argumentos siguen fuera del
+contrato actual; los tipos y nombres se comprueban en la fase semántica.
+
+Pruebas sintácticas, incluyendo recuperación con entradas generadas:
+
+```powershell
+.\mvnw.cmd test-compile
+java -cp "target/classes;target/test-classes" fisio.analysis.ParserRegression
+```
+
 ## Análisis semántico actual (Rust-like)
 
 La gramática activa es el subconjunto Rust-like de `FISIO.jj`. El nuevo paquete
@@ -29,6 +91,7 @@ Reglas implementadas:
   Se permite volver a declarar con `let` (shadowing, como en Rust); se rechazan
   funciones y parámetros duplicados. El inicializador se resuelve antes de
   introducir el nuevo nombre. `_` descarta el enlace y no es una variable.
+  `_ = expresión;` comprueba el valor y lo descarta; `_ += ...` no es válido.
 - Mutabilidad: asignación simple/compuesta exige `let mut`. Parámetros y
   variables de iteración son inmutables en la gramática actual.
 - Tipos: `i8/i16/i32/i64/i128/isize`, `u8/u16/u32/u64/u128/usize`, `f32/f64`,
@@ -41,7 +104,8 @@ Reglas implementadas:
   `&&/||/!` requieren booleanos; `-` admite números con signo y decimales.
   Igualdad entre tipos compatibles y orden entre números o cadenas.
 - Condiciones `if/while` booleanas. `for` requiere un rango de enteros del
-  mismo tipo y limita el ámbito de su variable al cuerpo.
+  mismo tipo y limita el ámbito de su variable al cuerpo. Los rangos `..` y
+  `..=` tienen tipos distintos: no pueden intercambiarse por asignación.
 - Firmas registradas antes de recorrer cuerpos: llamadas adelantadas y
   recursión, existencia, número/tipo de argumentos, retornos explícitos,
   expresión final y compatibilidad de ramas. Sin `->`, el retorno es `()`.
@@ -52,7 +116,10 @@ Reglas implementadas:
   como no soportados. Una llamada `println(...)` es una función normal y
   debe estar declarada.
 - División/resto por cero cuando el divisor es una expresión constante
-  reconocida (literales, agrupación, negación, suma, resta y multiplicación).
+  reconocida (literales, agrupación, negación y operaciones aritméticas).
+  Se respetan truncamiento entero y redondeo `f32`/`f64`; se evita deducir
+  valores tras desbordamientos o emitir errores de cero sobre operadores
+  que ya fallaron por tipos. No se propagan valores de variables.
   Se acumulan errores independientes y se evitan cascadas de tipos desconocidos.
 
 Ejemplo: `let mut contador = 0; contador += "hola";` produce `OPERADOR` por
@@ -68,7 +135,7 @@ No es el compilador Rust: no implementa ownership, borrowing, traits,
 inferencia global, evaluación de variables ni detección de todos los errores
 en ejecución (por ejemplo, división por una variable que llegue a cero u
 overflow de operaciones). Usa las estructuras que conserva el AST actual;
-este todavía no distingue la inclusividad de `..` frente a `..=`.
+los rangos conservan si su extremo final es inclusivo, sin ejecutar la iteración.
 Los ejemplos anteriores solo sintácticos pueden ahora generar errores
 semánticos reales: el inicial usa un entero como iterable, y el de negativos
 mezcla `f64` con `i32`. No se alteraron para ocultar esos diagnósticos.

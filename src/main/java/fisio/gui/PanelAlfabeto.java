@@ -318,16 +318,16 @@ public final class PanelAlfabeto extends JPanel {
         agregarTitulo("Comentarios", 12);
         agregarTexto(
             "// comentario de línea\n"
-          + "/* comentario de bloque */\n"
+          + "/* comentario de bloque, admite anidamiento */\n"
           + "(se ignoran igual que los espacios: no generan token ni aparecen en la tabla)",
             TemaFisio.fuenteMono(Font.PLAIN, 10));
         agregarSeparador();
 
         agregarTitulo("Tokens Complejos", 12);
         agregarTablaTipos(List.of(
-            new FilaTipo("ID", "Identificador", TemaFisio.COL_ID),
-            new FilaTipo("NUM", "Número (entero o decimal)", TemaFisio.COL_NUM),
-            new FilaTipo("STRING", "Cadena de texto entre comillas", TemaFisio.COL_STRING),
+            new FilaTipo("ID", "Identificador ASCII: letra o _; después admite dígitos", TemaFisio.COL_ID),
+            new FilaTipo("NUM", "Número decimal sin sufijos ni exponentes", TemaFisio.COL_NUM),
+            new FilaTipo("STRING", "Cadena Unicode entre comillas; admite escapes básicos", TemaFisio.COL_STRING),
             new FilaTipo("ERROR", "Carácter no reconocido", Color.decode("#ff5555"))
         ));
     }

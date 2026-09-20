@@ -127,6 +127,8 @@ public class MapeoTokens {
         MAPEO.put(FisioParserConstants.ID, new InfoToken(CategoriaToken.ID, "ID"));
         MAPEO.put(FisioParserConstants.NUM, new InfoToken(CategoriaToken.NUM, "NUM"));
         MAPEO.put(FisioParserConstants.STRING, new InfoToken(CategoriaToken.STRING, "STRING"));
+        MAPEO.put(FisioParserConstants.CADENA_INVALIDA, new InfoToken(CategoriaToken.ERROR, "ERROR"));
+        MAPEO.put(FisioParserConstants.NUMERO_INVALIDO, new InfoToken(CategoriaToken.ERROR, "ERROR"));
         MAPEO.put(FisioParserConstants.ERROR, new InfoToken(CategoriaToken.ERROR, "ERROR"));
     }
 

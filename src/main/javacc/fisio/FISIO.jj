@@ -9,6 +9,7 @@ options
        parser.getNextToken()), asi que este cambio no requiere tocarlos.
        Mismo enfoque que el proyecto FISIO-JavaCC anterior. */
     STATIC = false;
+    UNICODE_INPUT = true;
 }
 
 PARSER_BEGIN(FisioParser)
@@ -61,13 +62,25 @@ public class FisioParser {
         return new TokenFisio(t.image, info.categoria, info.idTok, t.beginLine, t.beginColumn);
     }
 
-    private TokenFisio eofTokenFisio() {
-        Token ultimo = getToken(0);
-        if (ultimo == null || ultimo.image == null || ultimo.kind == FisioParserConstants.EOF) {
-            return new TokenFisio("", CategoriaToken.EOF, "EOF", 1, 1);
+    private int lineaFin = 1;
+    private int columnaFin = 1;
+
+    /** Posición real del EOF, incluyendo espacios y comentarios finales. */
+    public void configurarFinFuente(String codigo) {
+        lineaFin = 1;
+        columnaFin = 1;
+        for (int i = 0; i < codigo.length(); i++) {
+            char c = codigo.charAt(i);
+            if (c == '\r' || c == '\n') {
+                if (c == '\r' && i + 1 < codigo.length() && codigo.charAt(i + 1) == '\n') i++;
+                lineaFin++;
+                columnaFin = 1;
+            } else columnaFin++;
         }
-        return new TokenFisio(
-            "", CategoriaToken.EOF, "EOF", ultimo.beginLine, ultimo.beginColumn + ultimo.image.length());
+    }
+
+    private TokenFisio eofTokenFisio() {
+        return new TokenFisio("", CategoriaToken.EOF, "EOF", lineaFin, columnaFin);
     }
 
     /* Solo registra el error (efecto secundario); cada produccion decide
@@ -100,7 +113,7 @@ public class FisioParser {
         int parentesis = 0;
         while (true) {
             int k = getToken(1).kind;
-            if (k == EOF || k == PUNTO_COMA || k == LLAVE_IZQ || k == LLAVE_DER
+            if (k == EOF || k == FN || k == PUNTO_COMA || k == LLAVE_IZQ || k == LLAVE_DER
                     || (parentesis == 0 && (k == COMA || k == PAREN_DER))) {
                 return;
             }
@@ -114,120 +127,43 @@ public class FisioParser {
        el cierre de la funcion: conservar '{' para que Bloque lo analice. */
     private void sincronizarCabeceraControl() {
         while (getToken(1).kind != EOF && getToken(1).kind != PUNTO_COMA
-                && getToken(1).kind != LLAVE_IZQ && getToken(1).kind != LLAVE_DER) {
+                && getToken(1).kind != LLAVE_IZQ && getToken(1).kind != LLAVE_DER && getToken(1).kind != FN) {
             getNextToken();
         }
     }
 
-    /* Punto de sincronizacion para sentencias: avanza hasta ';' (lo
-       consume, cierre natural de sentencia), '}' o EOF (ninguno de los
-       dos se consume aqui: los debe ver el nivel que llamo, Bloque()). */
+    /** Recuperación local: conserva la siguiente sentencia inequívoca y su ámbito. */
     private void sincronizar() {
-        while (getToken(1).kind != FisioParserConstants.EOF
-                && getToken(1).kind != FisioParserConstants.PUNTO_COMA
-                && getToken(1).kind != FisioParserConstants.LLAVE_DER) {
-            getNextToken();
-        }
-        if (getToken(1).kind == FisioParserConstants.PUNTO_COMA) {
-            getNextToken();
-        }
-    }
-
-    /* Punto de sincronizacion para el cierre de un bloque: avanza hasta
-       '}' (lo consume) o EOF (no lo consume). */
-    private void sincronizarHastaLlaveDerOFin() {
-        while (getToken(1).kind != FisioParserConstants.EOF
-                && getToken(1).kind != FisioParserConstants.LLAVE_DER) {
-            getNextToken();
-        }
-        if (getToken(1).kind == FisioParserConstants.LLAVE_DER) {
-            getNextToken();
-        }
-    }
-
-    /* Sincronizacion "catastrofica" para un encabezado de fn malformado
-       (identificador o parentesis ausentes): en V1 solo se soporta un
-       programa simple, sin recuperacion fina entre funciones, asi que se
-       consume todo lo que quede. Documentado como limitacion en el reporte. */
-    private void sincronizarHastaEof() {
-        while (getToken(1).kind != FisioParserConstants.EOF) {
-            getNextToken();
-        }
-    }
-
-    /* ── Deteccion de "expresion final de bloque" (revision general
-       Rust-like) ──
-       Version inicial: se probo con LOOKAHEAD sintactico de JavaCC
-       (LOOKAHEAD(Expresion() <LLAVE_DER>)) en Bloque(). Se revirtio: ese
-       mecanismo demostro NO ser confiable en cuanto Expresion() involucra
-       parentesis o llamadas a funcion (p.ej. "!es_par(n)", "(a+b)/2",
-       "x + (1)" como ultima linea de un cuerpo terminaban mal
-       clasificados como sentencia, con error "Se esperaba una
-       declaracion o sentencia") -- JavaCC no logra simular
-       correctamente su propio backtracking sobre una produccion tan
-       recursiva como Expresion() (que ademas se llama a si misma via el
-       parentesis de agrupacion en Primario()). En su lugar, esta
-       deteccion se resuelve con LOOKAHEAD SEMANTICO (LOOKAHEAD({ ... }))
-       sobre estos dos metodos, escritos en Java plano con getToken(n) --
-       sin backtracking de JavaCC, deterministicos y faciles de verificar. */
-    private boolean esInicioDeExpresionFinal() {
-        int k = getToken(1).kind;
-        if (k == FisioParserConstants.NUM || k == FisioParserConstants.STRING
-                || k == FisioParserConstants.TRUE || k == FisioParserConstants.FALSE
-                || k == FisioParserConstants.PAREN_IZQ || k == FisioParserConstants.MENOS
-                || k == FisioParserConstants.NEGACION) {
-            // Ninguno de estos tokens es un inicio valido de Sentencia()
-            // (su guard solo acepta LET/IF/WHILE/FOR/LOOP/RETURN/ID): si
-            // el token actual es uno de ellos, solo puede tratarse de la
-            // expresion final del bloque (o una entrada malformada, que
-            // Expresion()/Bloque() ya reportan con su recuperacion habitual).
-            return true;
-        }
-        if (k == FisioParserConstants.ID) {
-            // Unico caso ambiguo: un ID puede iniciar tanto una sentencia
-            // (asignacion/llamada/macro, siempre terminada en ';') como la
-            // expresion final (terminada en '}', sin ';'). Se resuelve con
-            // un escaneo manual hacia adelante.
-            return esExpresionFinalDesdeId();
-        }
-        return false;
-    }
-
-    /* Escanea desde el token actual (siempre ID) buscando, a profundidad
-       de parentesis 0, el primer ';' (es sentencia) o el primer '}' (es
-       la expresion final que cierra ESTE bloque). Ninguna de las formas
-       de sentencia que empiezan con ID (asignacion/llamada/macro) ni
-       ninguna expresion contienen '{'/'}' propios, asi que no hace falta
-       llevar profundidad de llaves aparte -- si aparece un '{' antes de
-       resolver, se trata como "no es expresion final" (entrada
-       malformada; la deja para que Sentencia() la reporte con su
-       recuperacion habitual, en vez de escanear indefinidamente). */
-    private boolean esExpresionFinalDesdeId() {
-        int profundidadParen = 0;
-        int i = 1;
+        int llaves = 0;
         while (true) {
-            Token t = getToken(i);
-            if (t.kind == FisioParserConstants.EOF) {
-                return false;
-            }
-            if (t.kind == FisioParserConstants.PAREN_IZQ) {
-                profundidadParen++;
-            } else if (t.kind == FisioParserConstants.PAREN_DER) {
-                profundidadParen--;
-            } else if (profundidadParen == 0) {
-                if (t.kind == FisioParserConstants.PUNTO_COMA) {
-                    return false;
-                }
-                if (t.kind == FisioParserConstants.LLAVE_DER) {
-                    return true;
-                }
-                if (t.kind == FisioParserConstants.LLAVE_IZQ) {
-                    return false;
-                }
-            }
-            i++;
+            int k = getToken(1).kind;
+            if (k == EOF || k == FN) return;
+            if (llaves == 0 && (k == LLAVE_DER || k == LET || k == IF || k == WHILE
+                    || k == FOR || k == LOOP || k == RETURN)) return;
+            getNextToken();
+            if (k == LLAVE_IZQ) llaves++;
+            else if (k == LLAVE_DER && --llaves == 0) return;
+            if (k == PUNTO_COMA && llaves == 0) return;
         }
     }
+
+    /** Salta una función dañada sin consumir la siguiente cabecera fn. */
+    private void sincronizarFuncion() {
+        int llaves = 0;
+        while (getToken(1).kind != EOF && getToken(1).kind != FN) {
+            int k = getNextToken().kind;
+            if (k == LLAVE_IZQ) llaves++;
+            if (k == LLAVE_DER && --llaves <= 0) return;
+        }
+    }
+
+    private boolean esAsignacion() {
+        if (getToken(1).kind != ID) return false;
+        int k = getToken(2).kind;
+        return k == ASIGNACION || k == MAS_IGUAL || k == MENOS_IGUAL
+            || k == MULT_IGUAL || k == DIV_IGUAL || k == MOD_IGUAL;
+    }
+
 }
 PARSER_END(FisioParser)
 
@@ -244,9 +180,30 @@ SKIP : {
 /* ==========================================
    2. COMENTARIOS
    ========================================== */
+TOKEN_MGR_DECLS : {
+    public int profundidadComentario;
+    public int lineaComentario;
+    public int columnaComentario;
+}
+
 SKIP : {
-    < "//" (~["\n", "\r"])* ("\n" | "\r" | "\r\n")? >
-  | < "/*" (~["*"])* "*" (~["/"] (~["*"])* "*")* "/" >
+    < "//" (~["\n", "\r"])* >
+  | < "/*" > {
+        profundidadComentario = 1;
+        lineaComentario = input_stream.getBeginLine();
+        columnaComentario = input_stream.getBeginColumn();
+    } : COMENTARIO
+}
+<COMENTARIO> SKIP : {
+    < "/*" > { profundidadComentario++; }
+  | < "*/" > { if (--profundidadComentario == 0) SwitchTo(DEFAULT); }
+  | < ~[] >
+}
+<*> TOKEN : {
+    <EOF> {
+        if (profundidadComentario > 0)
+            throw new TokenMgrError("Comentario de bloque sin cerrar", TokenMgrError.LEXICAL_ERROR);
+    }
 }
 
 /* ==========================================
@@ -344,7 +301,9 @@ TOKEN : {
 TOKEN : {
     < ID: ["a"-"z", "A"-"Z", "_"] ( ["a"-"z", "A"-"Z", "_", "0"-"9"] )* >
   | < NUM: (["0"-"9"])+ ("." (["0"-"9"])+)? >
-  | < STRING: "\"" (~["\""])* "\"" >
+  | < STRING: "\"" (~["\"", "\\"] | "\\" ["n", "r", "t", "0", "\\", "\"", "'"])* "\"" >
+  | < CADENA_INVALIDA: "\"" (~["\"", "\\", "\r", "\n"] | "\\" ~["\r", "\n"])* ("\"" | "\\")? >
+  | < NUMERO_INVALIDO: (["0"-"9"])+ ("." (["0"-"9"])+)? ["a"-"z", "A"-"Z", "_"] (["a"-"z", "A"-"Z", "_", "0"-"9"])* >
 }
 
 /* ==========================================
@@ -359,24 +318,17 @@ TOKEN : {
    ========================================================================= */
 
 NodoPrograma Programa():
+{ List<NodoAST> funciones = new ArrayList<NodoAST>(); }
 {
-    List<NodoAST> funciones = new ArrayList<NodoAST>();
-    NodoAST funcion;
-}
-{
-    (
-        LOOKAHEAD(1)
-        funcion = Funcion()
-        {
-            if (funcion != null) {
-                funciones.add(funcion);
-            }
-        }
-    )*
     {
-        if (getToken(1).kind != FisioParserConstants.EOF) {
-            registrarError("Se esperaba 'fn' o fin de archivo");
-            sincronizarHastaEof();
+        while (getToken(1).kind != EOF) {
+            if (getToken(1).kind == FN) {
+                NodoAST funcion = Funcion();
+                if (funcion != null) funciones.add(funcion);
+            } else {
+                registrarError("Se esperaba 'fn' o fin de archivo");
+                do { getNextToken(); } while (getToken(1).kind != EOF && getToken(1).kind != FN);
+            }
         }
     }
     <EOF>
@@ -396,7 +348,7 @@ NodoAST Funcion():
     {
         if (getToken(1).kind != FisioParserConstants.ID) {
             registrarError("Se esperaba identificador despues de 'fn'");
-            sincronizarHastaLlaveDerOFin();
+            sincronizarFuncion();
             return null;
         }
     }
@@ -404,7 +356,7 @@ NodoAST Funcion():
     {
         if (!coincidirToken(FisioParserConstants.PAREN_IZQ)) {
             registrarError("Se esperaba '(' despues del nombre de la funcion");
-            sincronizarHastaLlaveDerOFin();
+            sincronizarFuncion();
             return null;
         }
     }
@@ -413,7 +365,7 @@ NodoAST Funcion():
         parametro = Parametro()
         {
             if (parametro == null) {
-                sincronizarHastaLlaveDerOFin();
+                sincronizarFuncion();
                 return null;
             }
             parametros.add(parametro);
@@ -424,14 +376,14 @@ NodoAST Funcion():
             {
                 if (getToken(1).kind != FisioParserConstants.ID) {
                     registrarError("Se esperaba un parametro despues de ','");
-                    sincronizarHastaLlaveDerOFin();
+                    sincronizarFuncion();
                     return null;
                 }
             }
             parametro = Parametro()
             {
                 if (parametro == null) {
-                    sincronizarHastaLlaveDerOFin();
+                    sincronizarFuncion();
                     return null;
                 }
                 parametros.add(parametro);
@@ -441,7 +393,7 @@ NodoAST Funcion():
     {
         if (!coincidirToken(FisioParserConstants.PAREN_DER)) {
             registrarError("Se esperaba ')' para cerrar los parametros");
-            sincronizarHastaLlaveDerOFin();
+            sincronizarFuncion();
             return null;
         }
     }
@@ -451,7 +403,7 @@ NodoAST Funcion():
         {
             if (getToken(1).kind != FisioParserConstants.ID) {
                 registrarError("Se esperaba tipo de retorno despues de '->'");
-                sincronizarHastaLlaveDerOFin();
+                sincronizarFuncion();
                 return null;
             }
         }
@@ -494,44 +446,37 @@ NodoParametroFuncion Parametro():
 NodoBloque Bloque():
 {
     List<NodoAST> sentencias = new ArrayList<NodoAST>();
-    NodoAST sentencia;
     NodoAST expresionFinal = null;
-    Token apertura;
 }
 {
     {
-        if (getToken(1).kind != FisioParserConstants.LLAVE_IZQ) {
+        Token apertura = getToken(1);
+        if (!coincidirToken(LLAVE_IZQ)) {
             registrarError("Se esperaba '{' para iniciar el bloque");
-            TokenFisio actual = tokenFisioDe(getToken(1));
-            return new NodoBloque(actual.linea(), actual.columna(), sentencias, null);
+            return new NodoBloque(apertura.beginLine, apertura.beginColumn, sentencias, null);
         }
-    }
-    apertura=<LLAVE_IZQ>
-    (
-        LOOKAHEAD(1)
-        (
-        LOOKAHEAD({ esInicioDeExpresionFinal() })
-        expresionFinal = Expresion()
-        {
-            if (expresionFinal == null) sincronizar();
-        }
-      |
-        LOOKAHEAD(1)
-        sentencia = Sentencia()
-        {
-            if (sentencia != null) {
-                sentencias.add(sentencia);
+        while (getToken(1).kind != LLAVE_DER && getToken(1).kind != EOF && getToken(1).kind != FN) {
+            Token inicio = getToken(1);
+            if (esInicioExpresion(inicio.kind) && !esAsignacion()) {
+                NodoAST expresion = Expresion();
+                if (expresion == null) sincronizar();
+                else if (coincidirToken(PUNTO_COMA)) sentencias.add(expresion);
+                else if (getToken(1).kind == LLAVE_DER) {
+                    expresionFinal = expresion;
+                    break;
+                } else {
+                    registrarError("Se esperaba ';' o '}' despues de la expresion");
+                    sincronizar();
+                }
+            } else {
+                NodoAST sentencia = Sentencia();
+                if (sentencia != null) sentencias.add(sentencia);
             }
+            // La recuperación nunca debe dejar el bucle sobre el mismo token.
+            if (getToken(1) == inicio) getNextToken();
         }
-        )
-    )*
-    {
-        if (!coincidirToken(FisioParserConstants.LLAVE_DER)) {
-            registrarError("Se esperaba '}' para cerrar el bloque");
-            sincronizarHastaLlaveDerOFin();
-        }
-        TokenFisio aperturaFisio = tokenFisioDe(apertura);
-        return new NodoBloque(aperturaFisio.linea(), aperturaFisio.columna(), sentencias, expresionFinal);
+        if (!coincidirToken(LLAVE_DER)) registrarError("Se esperaba '}' para cerrar el bloque");
+        return new NodoBloque(apertura.beginLine, apertura.beginColumn, sentencias, expresionFinal);
     }
 }
 
@@ -559,7 +504,7 @@ NodoAST Sentencia():
       | resultado = SentenciaFor()
       | resultado = SentenciaLoop()
       | resultado = SentenciaReturn()
-      | LOOKAHEAD(2) resultado = Asignacion() 
+      | LOOKAHEAD({ esAsignacion() }) resultado = Asignacion()
       | resultado = SentenciaExpresion()
     )
     { return resultado; }
@@ -865,8 +810,8 @@ NodoAST ExpRango():
         {
             if (derecha == null) return null;
             TokenFisio opFisio = tokenFisioDe(operador);
-            // Eliminamos el booleano extra para coincidir con la clase de tu compañero
-            izquierda = new NodoRango(opFisio.linea(), opFisio.columna(), izquierda, derecha);
+            izquierda = new NodoRango(opFisio.linea(), opFisio.columna(), izquierda, derecha,
+                operador.kind == RANGO_INCLUSIVO);
         }
     )?
     { return izquierda; }
