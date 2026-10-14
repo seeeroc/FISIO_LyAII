@@ -1,13 +1,6 @@
 options
 {
-    /* Fase 2: el parser acumula estado por instancia (listaErrores) y cada
-       produccion necesita leerlo/mutarlo (registrarError, sincronizar).
-       Con el STATIC=true por defecto de JavaCC, Programa()/Bloque()/etc.
-       se generan como metodos static y no pueden tocar un campo de
-       instancia -no compilarian-. FisioLexerRunner/FisioParserRunner ya
-       usan "new FisioParser(reader)" + metodos de instancia (parser.Programa(),
-       parser.getNextToken()), asi que este cambio no requiere tocarlos.
-       Mismo enfoque que el proyecto FISIO-JavaCC anterior. */
+    /* El parser conserva errores y estado de recuperación por instancia. */
     STATIC = false;
     UNICODE_INPUT = true;
 }
@@ -314,7 +307,7 @@ TOKEN : {
 }
 
 /* =========================================================================
-   8. GRAMATICA SINTACTICA -- Fase 2: sentencias de control y declaraciones
+   8. GRAMATICA SINTACTICA: sentencias de control y declaraciones
    ========================================================================= */
 
 NodoPrograma Programa():

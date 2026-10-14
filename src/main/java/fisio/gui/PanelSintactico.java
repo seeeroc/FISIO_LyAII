@@ -109,33 +109,31 @@ public final class PanelSintactico extends JPanel {
 
         if (!(obj instanceof NodoAST)) return;
 
-        // Checar a qué estructura pertenece
         String clase = obj.getClass().getSimpleName();
-        String mensaje = "";
-
-        switch (clase) {
-            case "NodoFuncion": mensaje = "Estructura de Función (fn)"; break;
-            case "NodoDeclaracion": mensaje = "Declaración de variable (let)"; break;
-            case "NodoAsignacion": mensaje = "Operación de Asignación (=, +=, -=)"; break;
-            case "NodoIf": mensaje = "Estructura condicional (if / else)"; break;
-            case "NodoWhile": mensaje = "Ciclo (while)"; break;
-            case "NodoFor": mensaje = "Ciclo (for .. in)"; break;
-            case "NodoInvocacionMacro": mensaje = "Invocación de Macro (ej. println!)"; break;
-            case "NodoLlamadaFuncion": mensaje = "Llamada a una función"; break;
-            case "NodoReturn": mensaje = "Sentencia de retorno (return)"; break;
-        }
+        String mensaje = switch (clase) {
+            case "NodoFuncion" -> "Estructura de Función (fn)";
+            case "NodoDeclaracion" -> "Declaración de variable (let)";
+            case "NodoAsignacion" -> "Operación de Asignación (=, +=, -=)";
+            case "NodoIf" -> "Estructura condicional (if / else)";
+            case "NodoWhile" -> "Ciclo (while)";
+            case "NodoFor" -> "Ciclo (for .. in)";
+            case "NodoInvocacionMacro" -> "Invocación de Macro (ej. println!)";
+            case "NodoLlamadaFuncion" -> "Llamada a una función";
+            case "NodoReturn" -> "Sentencia de retorno (return)";
+            default -> "";
+        };
 
         if (!mensaje.isEmpty()) {
             doc.insertString(doc.getLength(), "  ✔️ Se validó correctamente: " + mensaje + "\n", estiloDim);
         }
 
-        // Profundizar en los hijos del nodo automáticamente
-        for (java.lang.reflect.Field field : obj.getClass().getDeclaredFields()) {
-            field.setAccessible(true);
+        for (java.lang.reflect.RecordComponent componente : obj.getClass().getRecordComponents()) {
             try {
-                Object hijo = field.get(obj);
+                Object hijo = componente.getAccessor().invoke(obj);
                 recorrerYValidar(hijo, doc);
-            } catch (Exception ignored) {}
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException("No se pudo recorrer el AST.", e);
+            }
         }
     }
 

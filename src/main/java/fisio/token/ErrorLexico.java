@@ -1,8 +1,5 @@
 package fisio.token;
 
-/**
- * Equivalente funcional del dataclass ErrorLexico de token_types.py
- * (lexema, mensaje, linea, columna).
- */
+/** Diagnóstico léxico con el fragmento y la posición que lo originaron. */
 public record ErrorLexico(String lexema, String mensaje, int linea, int columna) {
 }

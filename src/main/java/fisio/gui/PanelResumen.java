@@ -26,8 +26,10 @@ public final class PanelResumen extends JPanel {
         salida.append("FASES DEL ANÁLISIS\n\n")
             .append("Léxico: ").append(r.estadoLexico().texto).append("\n")
             .append("Sintáctico: ").append(r.estadoSintactico().texto).append("\n")
-            .append("Semántico: ").append(r.estadoSemantico().texto).append("\n\n")
+            .append("Semántico: ").append(r.estadoSemantico().texto).append("\n")
+            .append("Código intermedio: ").append(r.estadoCodigoIntermedio().texto).append("\n\n")
             .append("Tokens: ").append(r.lexico().tokens().size()).append("\n")
+            .append("Expresiones aritméticas: ").append(r.codigoIntermedio().expresiones().size()).append("\n")
             .append("Errores encontrados: ").append(r.errores()).append("\n\nDISTRIBUCIÓN DE TOKENS\n\n");
         Map<String, Integer> conteos = new LinkedHashMap<>();
         r.lexico().tokens().forEach(t -> conteos.merge(t.categoria().name(), 1, Integer::sum));
@@ -38,6 +40,7 @@ public final class PanelResumen extends JPanel {
         r.lexico().errores().forEach(e -> diagnostico(salida, "Léxico", e.linea(), e.columna(), e.mensaje()));
         if (r.sintactico() != null) r.sintactico().errores().forEach(e -> diagnostico(salida, "Sintáctico", e.linea(), e.columna(), e.mensaje()));
         if (r.semantico() != null) r.semantico().errores().forEach(e -> diagnostico(salida, "Semántico / " + e.codigo(), e.linea(), e.columna(), e.mensaje()));
+        r.codigoIntermedio().problemas().forEach(e -> diagnostico(salida, "Código intermedio", e.linea(), e.columna(), e.mensaje()));
         texto.setText(salida.toString());
         texto.setCaretPosition(0);
     }

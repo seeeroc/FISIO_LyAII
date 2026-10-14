@@ -92,14 +92,14 @@ public class MapeoTokens {
         MAPEO.put(FisioParserConstants.NEGACION, new InfoToken(CategoriaToken.SIG, "SIG_12"));
         MAPEO.put(FisioParserConstants.AMPERSAND, new InfoToken(CategoriaToken.SIG, "SIG_13"));
         MAPEO.put(FisioParserConstants.PIPE, new InfoToken(CategoriaToken.SIG, "SIG_14"));
-        // SIG_15 está libre, respetamos tu numeración original
+        // SIG_15 queda reservado para conservar la numeración pública.
         MAPEO.put(FisioParserConstants.FLECHA, new InfoToken(CategoriaToken.SIG, "SIG_16"));
         MAPEO.put(FisioParserConstants.FLECHA_GRUESA, new InfoToken(CategoriaToken.SIG, "SIG_17"));
         MAPEO.put(FisioParserConstants.DOBLE_DOS_PUNTOS, new InfoToken(CategoriaToken.SIG, "SIG_18"));
         MAPEO.put(FisioParserConstants.AND, new InfoToken(CategoriaToken.SIG, "SIG_19"));
         MAPEO.put(FisioParserConstants.OR, new InfoToken(CategoriaToken.SIG, "SIG_20"));
 
-        // Asignaciones compuestas y rangos (Tus agregados)
+        // Asignaciones compuestas y rangos.
         MAPEO.put(FisioParserConstants.MAS_IGUAL, new InfoToken(CategoriaToken.SIG, "SIG_21"));
         MAPEO.put(FisioParserConstants.MENOS_IGUAL, new InfoToken(CategoriaToken.SIG, "SIG_22"));
         MAPEO.put(FisioParserConstants.MULT_IGUAL, new InfoToken(CategoriaToken.SIG, "SIG_23"));
@@ -107,7 +107,7 @@ public class MapeoTokens {
         MAPEO.put(FisioParserConstants.MOD_IGUAL, new InfoToken(CategoriaToken.SIG, "SIG_25"));
         MAPEO.put(FisioParserConstants.RANGO, new InfoToken(CategoriaToken.SIG, "SIG_26"));
 
-        // Nuevos Signos y Operadores (Rust 100%)
+        // Signos y operadores adicionales del alfabeto Rust-like.
         MAPEO.put(FisioParserConstants.SHIFT_IZQ_IGUAL, new InfoToken(CategoriaToken.SIG, "SIG_27"));
         MAPEO.put(FisioParserConstants.SHIFT_DER_IGUAL, new InfoToken(CategoriaToken.SIG, "SIG_28"));
         MAPEO.put(FisioParserConstants.AND_BIT_IGUAL, new InfoToken(CategoriaToken.SIG, "SIG_29"));

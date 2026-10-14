@@ -12,17 +12,7 @@ import javax.swing.JScrollPane;
 
 import fisio.token.CategoriaToken;
 
-/**
- * Especificacion lexica de FISIO, equivalente a PanelAlfabeto (gui.py).
- *
- * Contenido estatico que NO depende de ningun analisis (igual que en
- * gui.py, donde _poblar_informacion() se ejecuta una sola vez en el
- * constructor). Los datos (lexema, tipo, id) son una traduccion 1:1 de
- * PALABRAS_RESERVADAS / OPERADORES_MATEMATICOS / OPERADORES_RELACIONALES /
- * SIGNOS en token_types.py — se reutiliza el enum CategoriaToken (ya
- * congelado) para las etiquetas de tipo en vez de duplicar strings, pero
- * ninguna clase de fisio.token se modifica.
- */
+/** Referencia estática de los alfabetos FISIO original y Rust-like actual. */
 public final class PanelAlfabeto extends JPanel {
 
     private record Entrada(String lexema, CategoriaToken tipo, String idFisio) {
@@ -31,7 +21,6 @@ public final class PanelAlfabeto extends JPanel {
     private record FilaTipo(String sigla, String descripcion, Color color) {
     }
 
-    // Mismo orden que PALABRAS_RESERVADAS en token_types.py.
     private static final List<Entrada> PALABRAS_RESERVADAS = List.of(
         new Entrada("mru", CategoriaToken.PR, "PR_01"),
         new Entrada("mrua", CategoriaToken.PR, "PR_02"),

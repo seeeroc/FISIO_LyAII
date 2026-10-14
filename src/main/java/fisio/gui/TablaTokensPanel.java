@@ -18,15 +18,7 @@ import fisio.token.CategoriaToken;
 import static fisio.token.CategoriaToken.STRING;
 import fisio.token.TokenFisio;
 
-/**
- * Tabla de tokens, equivalente visual a TablaTokens (gui.py / ttk.Treeview).
- *
- * Desde el Paso 6C, poblar(tokens) consume ResultadoLexico.tokens() --
- * incluye tambien los TokenFisio con categoria=ERROR (paridad con Python,
- * donde self._tokens ya trae esas entradas: ver TablaTokens.poblar() en
- * gui.py, que decide la fila "ERROR" mirando tok.tipo == TipoToken.ERROR
- * dentro de la MISMA lista de tokens, no de una lista de errores aparte).
- */
+/** Tabla de tokens con color por categoría léxica. */
 public final class TablaTokensPanel extends JPanel {
 
     private static final String[] COLUMNAS = {"Lexema", "Tipo", "ID Token", "Línea", "Columna"};
@@ -103,12 +95,7 @@ public final class TablaTokensPanel extends JPanel {
         };
     }
 
-    /**
-     * Reproduce el esquema de colores de gui.py: filas ERROR con fondo
-     * rojo oscuro/texto blanco fijo (ver tag_configure("ERROR", ...) en
-     * TablaTokens); filas normales con texto del color de su categoria y
-     * fondo alternado par/impar (bg_row_alt / bg_panel).
-     */
+    /** Renderiza errores con contraste alto y alterna el fondo de las demás filas. */
     private final class RenderizadorFila extends DefaultTableCellRenderer {
         @Override
         public Component getTableCellRendererComponent(

@@ -29,20 +29,7 @@ import fisio.semantic.ErrorSemantico;
 import fisio.token.ErrorLexico;
 import fisio.token.TokenFisio;
 
-/**
- * Editor de codigo con numeracion de lineas, equivalente visual a
- * EditorCodigo (gui.py).
- *
- * Desde el Paso 6C incluye resaltado lexico real (equivalente a
- * EditorCodigo.resaltar() en Python), aplicado como atributos de caracter
- * sobre el StyledDocument del JTextPane -- nunca se modifica el texto.
- *
- * Los numeros de linea se implementan como row header del mismo
- * JScrollPane que el texto principal — a diferencia de gui.py (que
- * sincroniza manualmente dos widgets Text porque Tkinter no tiene
- * row header nativo), esto es la solucion Swing estandar y sincroniza el
- * scroll automaticamente sin codigo adicional.
- */
+/** Editor con numeración de líneas y resaltado por fase de análisis. */
 public final class EditorCodigoPanel extends JPanel {
 
     private final JTextPane texto;
@@ -120,13 +107,6 @@ public final class EditorCodigoPanel extends JPanel {
             }
         });
 
-        // Fase 2: indicador de Línea/Columna del cursor, estilo IDE. Se
-        // apoya en el caret REAL del JTextPane (CaretListener), nunca en
-        // el mouse ni en un calculo manual -- se dispara con clics, flechas,
-        // Home/End, escritura, borrado, Enter, seleccion de texto, y
-        // tambien con cambios programaticos de caret (setCaretPosition,
-        // usado por setCodigo()/limpiar() mas abajo), asi que abrir un
-        // archivo, cargar un ejemplo o limpiar tambien lo actualizan.
         texto.addCaretListener(e -> notificarCursor());
     }
 
@@ -142,13 +122,7 @@ public final class EditorCodigoPanel extends JPanel {
         }
     }
 
-    /**
-     * Traduce una posicion absoluta del Document a (linea, columna) base 1,
-     * usando el mismo modelo de Element/offsets que offsetDe()/finDeLinea()
-     * ya usan para el resaltado -- consistente con LF y CRLF sin casos
-     * especiales, y con el caret "dot" si hay una seleccion activa (basta
-     * con esa posicion, sin reportar el tamaño de la seleccion).
-     */
+    /** Traduce una posición absoluta del documento a línea y columna, ambas desde 1. */
     private int[] calcularLineaColumna(int posicionCaret) {
         Element raiz = documentoEstilado.getDefaultRootElement();
         int indiceLinea = raiz.getElementIndex(posicionCaret);
@@ -158,30 +132,12 @@ public final class EditorCodigoPanel extends JPanel {
         return new int[]{linea, columna};
     }
 
-    /**
-     * Se invoca en cada insercion/borrado del documento -- tanto por
-     * tipeo del usuario como por setCodigo()/limpiar() programaticos (el
-     * llamador es responsable de distinguirlos si le importa, p.ej.
-     * restableciendo su propio flag justo despues de llamar setCodigo()).
-     * Preparado para 6C: la GUI necesitara saber si el codigo cambio desde
-     * el ultimo analisis lexico (codigo analizado vs. codigo actual).
-     */
+    /** Registra un listener para cada inserción o eliminación de texto. */
     public void addCambioListener(Runnable listener) {
         listenersCambio.add(listener);
     }
 
-    /**
-     * Se difiere con invokeLater porque este metodo se invoca DESDE el
-     * propio insertUpdate/removeUpdate del DocumentListener del editor --
-     * si un listener (p.ej. la invalidacion de analisis en
-     * VentanaPrincipal) intentara mutar los atributos del mismo Document
-     * de forma sincrona aqui (aplicarResaltado -> setCharacterAttributes),
-     * Swing lanza "IllegalStateException: Attempt to mutate in
-     * notification" porque el Document todavia esta notificando este
-     * mismo cambio. Diferir al siguiente ciclo del EDT evita el problema
-     * sin cambiar el comportamiento observable (ocurre en el mismo golpe
-     * de tecla, sin demora perceptible).
-     */
+    /** Difiere la notificación para no modificar estilos durante un evento del documento. */
     private void notificarCambio() {
         for (Runnable listener : listenersCambio) {
             SwingUtilities.invokeLater(listener);
@@ -223,73 +179,26 @@ public final class EditorCodigoPanel extends JPanel {
         estilosPorCategoria.put(nombre, estilo);
     }
 
-    /**
-     * Equivalente a EditorCodigo.resaltar(tokens, errores) en gui.py:
-     * 1) restablece TODO el documento al estilo base (evita que un analisis
-     *    anterior deje colores residuales); 2) marca de fondo las lineas
-     * con error; 3) colorea cada token por categoria (incluye los tokens
-     * categoria=ERROR, que ya vienen dentro de "tokens" -- ver
-     * ResultadoLexico); 4) subraya el lexema exacto de cada error. Llamar
-     * con dos listas vacias equivale a "limpiar resaltado". Nunca modifica
-     * el texto del documento, solo sus atributos de caracter.
-     */
+    /** Colorea tokens y errores léxicos sin modificar el texto. */
     public void aplicarResaltado(List<TokenFisio> tokens, List<ErrorLexico> errores) {
-        int longitud = documentoEstilado.getLength();
-        documentoEstilado.setCharacterAttributes(0, longitud, estiloBase, true);
-
         Set<Integer> lineasError = new LinkedHashSet<>();
         for (ErrorLexico err : errores) {
             lineasError.add(err.linea());
         }
-        for (int linea : lineasError) {
-            int inicio = offsetDe(linea, 1);
-            int fin = finDeLinea(linea);
-            if (fin > inicio) {
-                documentoEstilado.setCharacterAttributes(inicio, fin - inicio, estiloLineaError, false);
-            }
-        }
-
-        for (TokenFisio tok : tokens) {
-            aplicarEstiloRango(tok.categoria().name(), tok.linea(), tok.columna(), tok.lexema().length());
-        }
+        aplicarResaltadoBase(tokens, lineasError);
 
         for (ErrorLexico err : errores) {
             aplicarEstiloRango("ERROR", err.linea(), err.columna(), err.lexema().length());
         }
     }
 
-    /**
-     * Equivalente a aplicarResaltado(tokens, errores) pero para el
-     * resultado sintactico (F6): gui.py reutiliza el mismo
-     * EditorCodigo.resaltar(tokens, errores) para ambos casos porque en
-     * Python ErrorLexico/ErrorSintactico se acceden por duck typing
-     * (.linea/.columna/.lexema). En Java no existe una interfaz comun
-     * entre esos dos records congelados (ni se debe crear una para esto),
-     * asi que se expone un segundo metodo con la misma logica en vez de
-     * forzar una abstraccion artificial entre fisio.token y
-     * fisio.analysis. "tokens" sigue siendo la lista lexica de F5 (mismo
-     * criterio que el self._tokens que Python reutiliza en
-     * _analizar_sintactico); solo la fuente de los errores cambia.
-     */
+    /** Colorea tokens y errores sintácticos sin modificar el texto. */
     public void aplicarResaltadoSintactico(List<TokenFisio> tokens, List<ErrorSintactico> erroresSintacticos) {
-        int longitud = documentoEstilado.getLength();
-        documentoEstilado.setCharacterAttributes(0, longitud, estiloBase, true);
-
         Set<Integer> lineasError = new LinkedHashSet<>();
         for (ErrorSintactico err : erroresSintacticos) {
             lineasError.add(err.linea());
         }
-        for (int linea : lineasError) {
-            int inicio = offsetDe(linea, 1);
-            int fin = finDeLinea(linea);
-            if (fin > inicio) {
-                documentoEstilado.setCharacterAttributes(inicio, fin - inicio, estiloLineaError, false);
-            }
-        }
-
-        for (TokenFisio tok : tokens) {
-            aplicarEstiloRango(tok.categoria().name(), tok.linea(), tok.columna(), tok.lexema().length());
-        }
+        aplicarResaltadoBase(tokens, lineasError);
 
         for (ErrorSintactico err : erroresSintacticos) {
             aplicarEstiloRango("ERROR", err.linea(), err.columna(), err.token().lexema().length());
@@ -297,15 +206,34 @@ public final class EditorCodigoPanel extends JPanel {
     }
 
     public void aplicarResaltadoSemantico(List<TokenFisio> tokens, List<ErrorSemantico> errores) {
-        aplicarResaltado(tokens, List.of());
+        Set<Integer> lineasError = new LinkedHashSet<>();
         for (ErrorSemantico error : errores) {
-            int inicio = offsetDe(error.linea(), 1);
-            int fin = finDeLinea(error.linea());
-            if (fin > inicio) documentoEstilado.setCharacterAttributes(inicio, fin - inicio, estiloLineaError, false);
+            lineasError.add(error.linea());
+        }
+        aplicarResaltadoBase(tokens, lineasError);
+
+        for (ErrorSemantico error : errores) {
             int longitud = tokens.stream()
                 .filter(t -> t.linea() == error.linea() && t.columna() == error.columna())
                 .mapToInt(t -> t.lexema().length()).findFirst().orElse(1);
             aplicarEstiloRango("ERROR", error.linea(), error.columna(), longitud);
+        }
+    }
+
+    private void aplicarResaltadoBase(List<TokenFisio> tokens, Set<Integer> lineasError) {
+        int longitud = documentoEstilado.getLength();
+        documentoEstilado.setCharacterAttributes(0, longitud, estiloBase, true);
+
+        for (int linea : lineasError) {
+            int inicio = offsetDe(linea, 1);
+            int fin = finDeLinea(linea);
+            if (fin > inicio) {
+                documentoEstilado.setCharacterAttributes(inicio, fin - inicio, estiloLineaError, false);
+            }
+        }
+
+        for (TokenFisio token : tokens) {
+            aplicarEstiloRango(token.categoria().name(), token.linea(), token.columna(), token.lexema().length());
         }
     }
 
@@ -333,7 +261,7 @@ public final class EditorCodigoPanel extends JPanel {
         return Math.max(0, Math.min(offset, documentoEstilado.getLength()));
     }
 
-    /** Offset de fin de linea (antes del salto de linea), equivalente a Tk "N.end". */
+    /** Offset de fin de línea, antes del salto. */
     private int finDeLinea(int linea) {
         Element raiz = documentoEstilado.getDefaultRootElement();
         int indiceLinea = Math.max(0, Math.min(linea - 1, raiz.getElementCount() - 1));

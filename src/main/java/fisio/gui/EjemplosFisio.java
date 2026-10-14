@@ -4,13 +4,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * Los 6 ejemplos precargados de gui.py (diccionario EJEMPLOS), trasladados
- * tal cual -- mismo nombre, mismo codigo caracter por caracter, mismo
- * orden. Se usa LinkedHashMap para preservar el orden de insercion (es el
- * orden en que EJEMPLOS.keys() los entrega en Python, y el orden en que
- * aparecen en el JComboBox de gui.py).
- */
+/** Ejemplos del subconjunto Rust-like actual, en el orden mostrado por la GUI. */
 public final class EjemplosFisio {
 
     private static final Map<String, String> EJEMPLOS = crearEjemplos();
@@ -18,7 +12,7 @@ public final class EjemplosFisio {
     private EjemplosFisio() {
     }
 
-    /** Nombre -> codigo, en el mismo orden que gui.py. Inmutable. */
+    /** Nombre del ejemplo a código fuente. */
     public static Map<String, String> mapa() {
         return EJEMPLOS;
     }
@@ -30,54 +24,6 @@ public final class EjemplosFisio {
     private static Map<String, String> crearEjemplos() {
         Map<String, String> m = new LinkedHashMap<>();
 
-        m.put("MRU completo",
-              "mru(velocidad := 20, tiempo := 5);\n"
-            + "posicion := velocidad * tiempo;\n"
-            + "graficar(posicion);\n");
-
-        m.put("MRUA + caída libre",
-              "mrua(aceleracion := 3, velocidad := 0, tiempo := 10);\n"
-            + "caida(gravedad := 9.81);\n"
-            + "altura := 150.5 - 0.5 * gravedad * tiempo ^ 2;\n"
-            + "velocidadFinal := velocidad + aceleracion * tiempo;\n"
-            + "simular(altura);\n");
-
-        m.put("Tiro parabólico",
-              "parabolico(alcance := 45, altura := 12.0);\n"
-            + "raiz(posicion);\n"
-            + "seno(angulo);\n"
-            + "coseno(angulo);\n"
-            + "magnitud(velocidad);\n"
-            + "despejar(alcance);\n");
-
-        m.put("Operadores y signos",
-              "x := 10;\n"
-            + "y := x + 5;\n"
-            + "z := y - 3;\n"
-            + "w := z * 2;\n"
-            + "v := w / 4;\n"
-            + "p := v ^ 2;\n"
-            + "ok := x <= y;\n"
-            + "nok := x != y;\n"
-            + "lista[0];\n");
-
-        m.put("Errores léxicos",
-              "a := .5;\n"
-            + "b := 5.;\n"
-            + "c := 1..5;\n"
-            + "d := 01;\n"
-            + "e := 12a;\n"
-            + "f := 9.8x;\n"
-            + "g := 5@2;\n"
-            + "h := 3#14;\n"
-            + "i := 5 ! 3;\n"
-            + "1variable := 10;\n");
-
-        // Renombrado desde "Fase 2: declaraciones y control" (revision
-        // general Rust-like): mismo contenido, nombre alineado con el
-        // resto de ejemplos "Rust-like - ..." agregados en esta tarea.
-        // VentanaPrincipal.EJEMPLO_INICIAL_NOMBRE se actualizo junto con
-        // este rename para seguir arrancando con este mismo ejemplo.
         m.put("Rust-like - declaraciones y control",
               "fn main() {\n"
             + "    let x = 10;\n"
@@ -94,7 +40,7 @@ public final class EjemplosFisio {
             + "        y = y - 1;\n"
             + "    }\n"
             + "\n"
-            + "    for elemento in y {\n"
+              + "    for elemento in y {\n"
             + "        let z = elemento;\n"
             + "    }\n"
             + "\n"
@@ -104,14 +50,11 @@ public final class EjemplosFisio {
         m.put("Fase 2: negativos y tipos",
               "fn main() {\n"
             + "    let gravedad: f64 = -9.81;\n"
-            + "    let contador: i32 = -5;\n"
-            + "    let z = -(gravedad + contador);\n"
-            + "    return z;\n"
+              + "    let contador: i32 = -5;\n"
+              + "    let z = -(gravedad + contador);\n"
+              + "    return z;\n"
             + "}\n");
 
-        // Ejemplos agregados en la revision general Rust-like (rangos,
-        // asignaciones compuestas, llamadas a funcion, macros tipo
-        // println!, tipo de retorno y expresion final de bloque).
         m.put("Rust-like - rangos y for",
               "fn main() {\n"
             + "    for elemento in 0..10 {\n"
@@ -154,6 +97,22 @@ public final class EjemplosFisio {
             + "    let alguna = activo || inactivo;\n"
             + "}\n");
 
+        m.put("Rust-like - código intermedio (CI)",
+              "fn main() {\n"
+            + "    let a: i32 = 10;\n"
+            + "    let b: i32 = 5;\n"
+            + "\n"
+            + "    let resultado = (a + b) * 2 - 8 / 4;\n"
+            + "    let residuo = resultado % 5;\n"
+            + "    let negativo = -(residuo + 3);\n"
+            + "\n"
+            + "    let mut acumulador = resultado;\n"
+            + "    acumulador += residuo * 2;\n"
+            + "\n"
+            + "    println!(\"Resultado: {}, residuo: {}, negativo: {}, acumulador: {}\",\n"
+            + "        resultado, residuo, negativo, acumulador);\n"
+            + "}\n");
+
         m.put("Rust-like - errores",
               "fn main() {\n"
             + "    println!(\"hola\";\n"
@@ -172,7 +131,7 @@ public final class EjemplosFisio {
         // 0 errores lexicos, 0 errores sintacticos (verificado).
         m.put("Rust-like - programa extenso (matematicas)",
               "// ============================================================\n"
-            + "// Ejemplo extenso Rust-like para FISIO (revision general).\n"
+            + "// Ejemplo extenso Rust-like para FISIO.\n"
             + "// Cubre el subconjunto sintactico soportado por FISIO.jj: fn/let/mut,\n"
             + "// tipos anotados, tipo de retorno \"->\", if/else/else if, while, for..in\n"
             + "// con rangos, loop, return, asignaciones compuestas (+= -= *= /= %=),\n"
@@ -462,20 +421,6 @@ public final class EjemplosFisio {
             + "\n"
             + "    return;\n"
             + "}\n");
-
-        m.put("Errores de alfabeto (Reales)",
-              "; Todos estos símbolos están fuera del alfabeto FISIO\n"
-            + "x := 5 @ 2;\n"
-            + "y := 3 # 14;\n"
-            + "precio := 100$;\n"
-            + "porcentaje := 50%;\n"
-            + "y_comercial := a & b;\n"
-            + "mi_variable := 25;\n"
-            + "conjunto := { 1, 2, 3 };\n"
-            + "mensaje := \"hola\";\n"
-            + "operador_invalido := a \\ b | c;\n"
-            + "pregunta := ¿test?;\n"
-            + "info := ¡alerta!;\n");
 
         return Collections.unmodifiableMap(m);
     }

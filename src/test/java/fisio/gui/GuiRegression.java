@@ -42,7 +42,7 @@ public final class GuiRegression {
     private static void comprobarResaltado(String faseConError) throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             JTextPane texto = (JTextPane) campo(editor, "texto");
-            for (String modulo : new String[]{"Léxico", "Sintáctico", "Semántico", "Tokens", "Resumen", "Alfabeto FISIO", "Alfabeto Rust"}) {
+            for (String modulo : new String[]{"Léxico", "Sintáctico", "Semántico", "Código Intermedio (CI)", "Tokens", "Resumen", "Alfabeto FISIO", "Alfabeto Rust"}) {
                 invocar("seleccionar", new Class<?>[]{String.class}, modulo);
                 boolean rojo = false;
                 var documento = texto.getStyledDocument();
@@ -92,6 +92,7 @@ public final class GuiRegression {
             SwingUtilities.invokeAndWait(() -> {
                 accion("verSintactico"); estado("Sintáctico", EstadoAnalisis.NO_EJECUTADO);
                 accion("verSemantico"); estado("Semántico", EstadoAnalisis.NO_EJECUTADO);
+                accion("verCodigoIntermedio"); estado("Código Intermedio (CI)", EstadoAnalisis.NO_EJECUTADO);
                 comprobar(campo(ventana, "tarea") == null, "Navegar ejecutó análisis");
             });
             String valido = "fn main() { let mut contador = 0; contador += 1; }";
@@ -100,23 +101,42 @@ public final class GuiRegression {
                 estado("Léxico", EstadoAnalisis.CORRECTO);
                 estado("Sintáctico", EstadoAnalisis.CORRECTO);
                 estado("Semántico", EstadoAnalisis.CORRECTO);
+                estado("Código Intermedio (CI)", EstadoAnalisis.CORRECTO);
                 var resultado = campo(ventana, "ultimoResultado");
-                accion("verSintactico"); accion("verSemantico");
+                accion("verSintactico"); accion("verSemantico"); accion("verCodigoIntermedio");
                 comprobar(resultado == campo(ventana, "ultimoResultado"), "Navegar reemplazó resultados");
+                var panelCi = campo(ventana, "panelCodigoIntermedio");
+                JEditorPane documentoCi = (JEditorPane) campo(panelCi, "documento");
+                try {
+                    String contenidoCi = documentoCi.getDocument().getText(0, documentoCi.getDocument().getLength());
+                    comprobar(contenidoCi.contains("Asignación compuesta a contador"), "CI no mostró la expresión analizada");
+                } catch (javax.swing.text.BadLocationException ex) {
+                    throw new AssertionError(ex);
+                }
+            });
+            captura(1280, "gui-ci.png");
+            ejecutar("fn main() { let cero = 0; let x = 5 / cero; }");
+            SwingUtilities.invokeAndWait(() -> {
+                estado("Semántico", EstadoAnalisis.CORRECTO);
+                estado("Código Intermedio (CI)", EstadoAnalisis.CON_ERRORES);
+                var r = (CoordinadorAnalisis.Resultado) campo(ventana, "ultimoResultado");
+                comprobar(r.codigoIntermedio().problemas().size() == 1, "CI no detectó división entre cero resuelta por variable");
             });
             ejecutar("fn main() { let x = $; }");
             SwingUtilities.invokeAndWait(() -> {
                 estado("Léxico", EstadoAnalisis.CON_ERRORES);
                 estado("Sintáctico", EstadoAnalisis.BLOQUEADO_POR_FASE_ANTERIOR);
                 estado("Semántico", EstadoAnalisis.BLOQUEADO_POR_FASE_ANTERIOR);
+                estado("Código Intermedio (CI)", EstadoAnalisis.BLOQUEADO_POR_FASE_ANTERIOR);
                 var r = (CoordinadorAnalisis.Resultado) campo(ventana, "ultimoResultado");
-                comprobar(r.sintactico() == null && r.semantico() == null, "Se ejecutaron fases bloqueadas");
+                comprobar(r.sintactico() == null && r.semantico() == null && !r.codigoIntermedio().generado(), "Se ejecutaron fases bloqueadas");
             });
             comprobarResaltado("Léxico");
             ejecutar("fn main() { let = 10; let x = 1; }");
             SwingUtilities.invokeAndWait(() -> {
                 estado("Sintáctico", EstadoAnalisis.CON_ERRORES);
                 estado("Semántico", EstadoAnalisis.BLOQUEADO_POR_FASE_ANTERIOR);
+                estado("Código Intermedio (CI)", EstadoAnalisis.BLOQUEADO_POR_FASE_ANTERIOR);
                 JTextPane sintaxis = (JTextPane) campo(campo(ventana, "panelSintactico"), "texto");
                 comprobar(sintaxis.getText().contains("AST parcial"), "Falta AST parcial");
             });
@@ -124,6 +144,7 @@ public final class GuiRegression {
             ejecutar("fn main() { let mut contador = 0; contador += \"hola\"; }");
             SwingUtilities.invokeAndWait(() -> {
                 estado("Semántico", EstadoAnalisis.CON_ERRORES);
+                estado("Código Intermedio (CI)", EstadoAnalisis.BLOQUEADO_POR_FASE_ANTERIOR);
                 JTextArea semantica = (JTextArea) campo(campo(ventana, "panelSemantico"), "texto");
                 comprobar(semantica.getText().contains("OPERADOR"), "Falta diagnóstico semántico");
                 accion("verSemantico");
@@ -151,6 +172,7 @@ public final class GuiRegression {
                 estado("Tokens", EstadoAnalisis.DESACTUALIZADO);
                 estado("Sintáctico", EstadoAnalisis.DESACTUALIZADO);
                 estado("Semántico", EstadoAnalisis.DESACTUALIZADO);
+                estado("Código Intermedio (CI)", EstadoAnalisis.DESACTUALIZADO);
                 estado("Alfabeto FISIO", EstadoAnalisis.CORRECTO);
                 estado("Alfabeto Rust", EstadoAnalisis.CORRECTO);
             });
@@ -162,11 +184,25 @@ public final class GuiRegression {
             esperar();
             SwingUtilities.invokeAndWait(() -> estado("Semántico", EstadoAnalisis.DESACTUALIZADO));
             ejecutar("fn otro() {}");
-            SwingUtilities.invokeAndWait(() -> estado("Semántico", EstadoAnalisis.CORRECTO));
+            SwingUtilities.invokeAndWait(() -> {
+                estado("Semántico", EstadoAnalisis.CORRECTO);
+                estado("Código Intermedio (CI)", EstadoAnalisis.CORRECTO);
+                JEditorPane documentoCi = (JEditorPane) campo(campo(ventana, "panelCodigoIntermedio"), "documento");
+                try {
+                    String contenidoCi = documentoCi.getDocument().getText(0, documentoCi.getDocument().getLength());
+                    comprobar(contenidoCi.contains("No se encontraron expresiones"), "Falta mensaje de CI vacío");
+                } catch (javax.swing.text.BadLocationException ex) {
+                    throw new AssertionError(ex);
+                }
+            });
             SwingUtilities.invokeAndWait(() -> {
                 invocar("cargarEjemplo", new Class<?>[]{String.class}, "Rust-like - funciones y println!");
                 estado("Semántico", EstadoAnalisis.NO_EJECUTADO);
+                estado("Código Intermedio (CI)", EstadoAnalisis.NO_EJECUTADO);
                 comprobar(editor.getCodigo().equals(EjemplosFisio.codigoDe("Rust-like - funciones y println!")), "Ejemplo incorrecto");
+                invocar("cargarEjemplo", new Class<?>[]{String.class}, "Rust-like - código intermedio (CI)");
+                comprobar(editor.getCodigo().contains("let resultado = (a + b) * 2 - 8 / 4;"), "Ejemplo de CI ausente");
+                estado("Código Intermedio (CI)", EstadoAnalisis.NO_EJECUTADO);
                 invocar("limpiarTodo", new Class<?>[0]);
                 estado("Léxico", EstadoAnalisis.NO_EJECUTADO);
                 estado("Sintáctico", EstadoAnalisis.NO_EJECUTADO);
@@ -174,7 +210,7 @@ public final class GuiRegression {
                 comprobar(campo(ventana, "ultimoResultado") == null, "Limpiar conservó resultados");
             });
             SwingUtilities.invokeAndWait(() -> estado("Semántico", EstadoAnalisis.NO_EJECUTADO));
-            System.out.println("GUI PASS: A-H, navegación sin ejecución, AST parcial, edición durante análisis alfabetos separados, resaltado por módulo y capturas 1280/900");
+            System.out.println("GUI PASS: pipeline completo, CI, navegación sin ejecución, AST parcial, invalidación, alfabetos y resaltado por módulo");
         } finally { SwingUtilities.invokeAndWait(ventana::dispose); }
     }
 }

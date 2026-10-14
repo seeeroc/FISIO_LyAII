@@ -2,11 +2,7 @@ package fisio.gui;
 
 import javax.swing.SwingUtilities;
 
-/**
- * Punto de entrada de la GUI FISIO — equivalente a main()/mainloop() en
- * gui.py. No contiene logica de analisis lexico/sintactico: solo crea la
- * ventana principal en el Event Dispatch Thread.
- */
+/** Punto de entrada de la aplicación Swing. */
 public final class AplicacionFisio {
 
     private AplicacionFisio() {

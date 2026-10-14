@@ -22,10 +22,11 @@ public final class VentanaPrincipal extends JFrame {
     private final PanelLexico panelLexico = new PanelLexico();
     private final PanelSintactico panelSintactico = new PanelSintactico();
     private final PanelSemantico panelSemantico = new PanelSemantico();
+    private final PanelCodigoIntermedio panelCodigoIntermedio = new PanelCodigoIntermedio();
     private final Map<String, PanelModulo> modulos = new LinkedHashMap<>();
     private final CardLayout tarjetas = new CardLayout();
     private final JPanel resultados = new JPanel(tarjetas);
-    private final JList<String> navegacion = new JList<>(new String[]{"Tokens", "Resumen", "Alfabeto FISIO", "Alfabeto Rust", "Léxico", "Sintáctico", "Semántico"});
+    private final JList<String> navegacion = new JList<>(new String[]{"Tokens", "Resumen", "Alfabeto FISIO", "Alfabeto Rust", "Léxico", "Sintáctico", "Semántico", "Código Intermedio (CI)"});
     private final JLabel lblArchivo = etiqueta("Sin archivo");
     private final JLabel lblCursor = etiqueta("Línea: 1 | Columna: 1");
     private final JLabel lblEstado = etiqueta("Listo · Ejecuta con F5");
@@ -51,6 +52,7 @@ public final class VentanaPrincipal extends JFrame {
         atajo("F5", "ejecutar", ejecutar);
         atajo("F6", "verSintactico", accion("Sintáctico", () -> seleccionar("Sintáctico")));
         atajo("F7", "verSemantico", accion("Semántico", () -> seleccionar("Semántico")));
+        atajo("F8", "verCodigoIntermedio", accion("Código Intermedio", () -> seleccionar("Código Intermedio (CI)")));
         cargarEjemplo("Rust-like - declaraciones y control");
     }
 
@@ -124,6 +126,7 @@ public final class VentanaPrincipal extends JFrame {
         agregarModulo("Léxico", panelLexico);
         agregarModulo("Sintáctico", panelSintactico);
         agregarModulo("Semántico", panelSemantico);
+        agregarModulo("Código Intermedio (CI)", panelCodigoIntermedio);
         modulos.get("Alfabeto FISIO").actualizar(EstadoAnalisis.CORRECTO, "Referencia del lenguaje anterior de física. No requiere ejecución.", true);
         modulos.get("Alfabeto Rust").actualizar(EstadoAnalisis.CORRECTO, "Referencia léxica del subconjunto Rust-like actual. No requiere ejecución.", true);
         navegacion.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -134,7 +137,7 @@ public final class VentanaPrincipal extends JFrame {
         navegacion.setSelectionBackground(TemaFisio.ACCENT);
         navegacion.setSelectionForeground(TemaFisio.BG_MAIN);
         navegacion.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        navegacion.setPreferredSize(new Dimension(145, 0));
+        navegacion.setPreferredSize(new Dimension(185, 0));
         navegacion.addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting() && navegacion.getSelectedValue() != null) {
                 tarjetas.show(resultados, navegacion.getSelectedValue());
@@ -229,9 +232,14 @@ public final class VentanaPrincipal extends JFrame {
         modulos.get("Semántico").actualizar(r.estadoSemantico(), r.semantico() == null
             ? "No se realizó el análisis semántico porque existen errores " + (r.sintactico() == null ? "léxicos." : "sintácticos.") + " Corrige y vuelve a ejecutar."
             : r.semantico().analizado() ? "Análisis semántico finalizado." : r.semantico().motivo(), r.semantico() != null);
+        panelCodigoIntermedio.poblar(r.codigoIntermedio());
+        modulos.get("Código Intermedio (CI)").actualizar(r.estadoCodigoIntermedio(),
+            r.codigoIntermedio().generado()
+                ? r.codigoIntermedio().expresiones().size() + " expresión(es) aritméticas procesadas."
+                : r.codigoIntermedio().motivo(), true);
         actualizarResaltado();
         lblEstado.setText("Léxico: " + r.estadoLexico().texto + "   |   Sintáctico: " + r.estadoSintactico().texto
-            + "   |   Semántico: " + r.estadoSemantico().texto);
+            + "   |   Semántico: " + r.estadoSemantico().texto + "   |   CI: " + r.estadoCodigoIntermedio().texto);
     }
     /** Conserva los colores de tokens; solo la fase visible marca sus errores. */
     private void actualizarResaltado() {
@@ -256,7 +264,7 @@ public final class VentanaPrincipal extends JFrame {
         cancelarTrabajo();
         estados(EstadoAnalisis.DESACTUALIZADO, "Los resultados corresponden a una versión anterior del código. Ejecuta nuevamente (F5).", false);
         editor.aplicarResaltado(List.of(), List.of());
-        lblEstado.setText("Léxico / Sintáctico / Semántico: desactualizados · Ejecuta nuevamente (F5)");
+        lblEstado.setText("Léxico / Sintáctico / Semántico / CI: desactualizados · Ejecuta nuevamente (F5)");
     }
     private void cancelarTrabajo() {
         ++generacion;
@@ -272,9 +280,10 @@ public final class VentanaPrincipal extends JFrame {
         panelResumen.limpiar();
         panelSintactico.limpiar();
         panelSemantico.limpiar();
+        panelCodigoIntermedio.limpiar();
         estados(EstadoAnalisis.NO_EJECUTADO, "Todavía no se ha realizado el análisis. Pulsa Ejecutar (F5).", false);
         editor.aplicarResaltado(List.of(), List.of());
-        lblEstado.setText("Léxico: no ejecutado   |   Sintáctico: no ejecutado   |   Semántico: no ejecutado");
+        lblEstado.setText("Léxico: no ejecutado   |   Sintáctico: no ejecutado   |   Semántico: no ejecutado   |   CI: no ejecutado");
     }
     @Override public void dispose() {
         cancelarTrabajo();
@@ -316,8 +325,7 @@ public final class VentanaPrincipal extends JFrame {
         try {
             return Files.readString(ruta, StandardCharsets.UTF_8);
         } catch (MalformedInputException ex) {
-            // Igual que _abrir_archivo en gui.py: si el archivo no es
-            // UTF-8 valido, reintenta con latin-1 en vez de fallar.
+            // Admite archivos heredados codificados en Latin-1.
             return Files.readString(ruta, StandardCharsets.ISO_8859_1);
         }
     }
@@ -366,9 +374,7 @@ public final class VentanaPrincipal extends JFrame {
 
         archivoActual = destino;
         lblArchivo.setText("Archivo: " + destino.getFileName());
-        // gui.py tampoco actualiza el titulo de la ventana en
-        // _guardar_archivo (solo en _abrir_archivo/_cargar_ejemplo) --
-        // se reproduce esa misma omision tal cual, no se "corrige".
+        setTitle("FISIO — " + destino.getFileName());
         JOptionPane.showMessageDialog(this,
             "Archivo guardado:\n" + destino,
             "Guardado", JOptionPane.INFORMATION_MESSAGE);
