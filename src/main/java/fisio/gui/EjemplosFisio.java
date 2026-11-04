@@ -39,6 +39,7 @@ public final class EjemplosFisio {
         agregarAlCatalogo(catalogo, "Errores semánticos", "Rust-like - errores", "errores");
         agregarAlCatalogo(catalogo, "Programa extenso · matemáticas",
             "Rust-like - programa extenso (matematicas)", "matematicas");
+        catalogo.put("Optimización", EJEMPLOS.get("Rust-like - optimización"));
         return Collections.unmodifiableMap(catalogo);
     }
 
@@ -97,6 +98,31 @@ public final class EjemplosFisio {
 
     private static long contarLineasDeCodigo(String codigo) {
         return codigo.lines().filter(linea -> !linea.isBlank()).count();
+    }
+
+    private static String crearEjemploOptimizacion() {
+        StringBuilder codigo = new StringBuilder();
+        codigo.append("/* Ejemplo extenso para demostrar las técnicas del optimizador FISIO. */\n\n");
+        for (int i = 1; i <= 26; i++) {
+            codigo.append("fn calcular_optimizacion_").append(i).append("(valor: i32) -> i32 {\n")
+                .append("    // La expresión constante puede resolverse antes de ejecutar.\n")
+                .append("    let constante = 2 + 3 * 4;\n")
+                .append("    let variable_no_usada = valor + ").append(i).append("; // Esta vinculación no se consulta.\n")
+                .append("    let resultado = constante + 0;\n")
+                .append("    return resultado;\n")
+                .append("    let codigo_inalcanzable = ").append(1000 + i).append(";\n")
+                .append("}\n\n");
+        }
+        codigo.append("fn main() {\n")
+            .append("    // Solo se utilizan algunos resultados para conservar llamadas observables.\n")
+            .append("    let primero = calcular_optimizacion_1(10);\n")
+            .append("    let segundo = calcular_optimizacion_13(20);\n")
+            .append("    let tercero = calcular_optimizacion_26(30);\n")
+            .append("    let identidad = primero * 1;\n")
+            .append("    let total = identidad + segundo + tercero + 0;\n")
+            .append("    println!(\"Resultado optimizado: {}\", total);\n")
+            .append("}\n");
+        return codigo.toString();
     }
 
     private static Map<String, String> crearEjemplos() {
@@ -890,6 +916,8 @@ public final class EjemplosFisio {
             + "\n"
             + "    return;\n"
             + "}\n");
+
+        m.put("Rust-like - optimización", crearEjemploOptimizacion());
 
         return Collections.unmodifiableMap(m);
     }

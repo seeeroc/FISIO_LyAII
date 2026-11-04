@@ -42,7 +42,8 @@ public final class GuiRegression {
     private static void comprobarResaltado(String faseConError) throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             JTextPane texto = (JTextPane) campo(editor, "texto");
-            for (String modulo : new String[]{"Léxico", "Sintáctico", "Semántico", "Código Intermedio (CI)", "Tokens", "Resumen", "Alfabeto FISIO", "Alfabeto Rust"}) {
+            for (String modulo : new String[]{"Léxico", "Sintáctico", "Semántico", "Código Intermedio (CI)",
+                    "Optimización", "Tokens", "Resumen", "Alfabeto FISIO", "Alfabeto Rust"}) {
                 invocar("seleccionar", new Class<?>[]{String.class}, modulo);
                 boolean rojo = false;
                 var documento = texto.getStyledDocument();
@@ -63,7 +64,8 @@ public final class GuiRegression {
         long limite = System.nanoTime() + 15_000_000_000L;
         AtomicReference<Boolean> terminado = new AtomicReference<>(false);
         do {
-            SwingUtilities.invokeAndWait(() -> terminado.set(campo(ventana, "tarea") == null));
+            SwingUtilities.invokeAndWait(() -> terminado.set(campo(ventana, "tarea") == null
+                && campo(ventana, "tareaOptimizacion") == null));
             if (terminado.get()) return;
             Thread.sleep(20);
         } while (System.nanoTime() < limite);
@@ -95,7 +97,8 @@ public final class GuiRegression {
             long lineas = codigo.lines().filter(linea -> !linea.isBlank()).count();
             comprobar(lineas >= 200, ejemplo.getKey() + " tiene menos de 200 líneas de código");
             boolean contieneComentarios = codigo.contains("//") || codigo.contains("/*") || codigo.contains("*/");
-            comprobar(!contieneComentarios, ejemplo.getKey() + " contiene comentarios");
+            comprobar(contieneComentarios == ejemplo.getKey().equals("Optimización"),
+                ejemplo.getKey() + " no cumple la política de comentarios de su ejemplo");
             var lexicoEjemplo = fisio.analysis.FisioLexerRunner.tokenize(codigo);
             var sintaxisEjemplo = fisio.analysis.FisioParserRunner.parse(codigo);
             comprobar(lexicoEjemplo.errores().isEmpty(), ejemplo.getKey() + " tiene errores léxicos");
@@ -228,7 +231,7 @@ public final class GuiRegression {
         try {
             SwingUtilities.invokeAndWait(() -> {
                 JComboBox<?> selector = (JComboBox<?>) campo(ventana, "selectorEjemplos");
-                comprobar(EjemplosFisio.mapa().size() == 10, "El catálogo visible debe ser reducido");
+                comprobar(EjemplosFisio.mapa().size() == 11, "El catálogo visible debe ser reducido");
                 comprobar(selector.getItemCount() == EjemplosFisio.mapa().size() + 1,
                     "El selector no coincide con el catálogo de ejemplos");
                 comprobar(editor.getCodigo().equals(EjemplosFisio.codigoDe("Fundamentos")),
@@ -240,6 +243,7 @@ public final class GuiRegression {
                 accion("verSintactico"); estado("Sintáctico", EstadoAnalisis.NO_EJECUTADO);
                 accion("verSemantico"); estado("Semántico", EstadoAnalisis.NO_EJECUTADO);
                 accion("verCodigoIntermedio"); estado("Código Intermedio (CI)", EstadoAnalisis.NO_EJECUTADO);
+                estado("Optimización", EstadoAnalisis.NO_EJECUTADO);
                 comprobar(campo(ventana, "tarea") == null, "Navegar ejecutó análisis");
             });
             String valido = "fn main() { let mut contador = 0; contador += 1; }";
@@ -350,6 +354,48 @@ public final class GuiRegression {
                 invocar("cargarEjemplo", new Class<?>[]{String.class}, "Código intermedio");
                 comprobar(editor.getCodigo().contains("let resultado = (a + b) * 2 - 8 / 4;"), "Ejemplo de CI ausente");
                 estado("Código Intermedio (CI)", EstadoAnalisis.NO_EJECUTADO);
+            });
+            SwingUtilities.invokeAndWait(() -> invocar("cargarEjemplo",
+                new Class<?>[]{String.class}, "Optimización"));
+            String originalOptimizacion = editor.getCodigo();
+            comprobar(originalOptimizacion.contains("variable_no_usada")
+                && originalOptimizacion.contains("// La expresión constante"),
+                "El ejemplo no contiene oportunidades de optimización");
+            SwingUtilities.invokeAndWait(() -> accion("optimizar"));
+            esperar();
+            captura(900, "gui-optimizacion-resumen-compacta.png");
+            SwingUtilities.invokeAndWait(() -> {
+                estado("Optimización", EstadoAnalisis.CORRECTO);
+                var resultado = (fisio.optimization.ResultadoOptimizacion) campo(ventana, "ultimaOptimizacion");
+                comprobar(resultado != null && resultado.exitoso() && !resultado.cambios().isEmpty(),
+                    "La GUI no conservó el resultado de optimización");
+                for (fisio.optimization.TecnicaOptimizacion tecnica
+                        : fisio.optimization.TecnicaOptimizacion.values()) {
+                    comprobar(resultado.metricas().cambiosPorTecnica().getOrDefault(tecnica, 0) > 0,
+                        "El ejemplo no demuestra " + tecnica.descripcion());
+                }
+                comprobar(resultado.metricas().bytesOptimizados() < resultado.metricas().bytesOriginales()
+                    && resultado.metricas().cuadruplosOptimizados() < resultado.metricas().cuadruplosOriginales(),
+                    "Las métricas no reflejan la reducción del ejemplo");
+                comprobar(editor.getCodigo().equals(resultado.codigoOptimizado())
+                    && !editor.getCodigo().contains("// La expresión constante")
+                    && !editor.getCodigo().contains("variable_no_usada"),
+                    "El editor no muestra el código optimizado");
+                PanelOptimizacion panel = (PanelOptimizacion) campo(ventana, "panelOptimizacion");
+                comprobar(panel.getReporte().contains("REPORTE DE OPTIMIZACIÓN FISIO")
+                    && !panel.getCambios().isEmpty(), "El panel no muestra reporte o cambios");
+                panel.seleccionarCambio(0);
+                invocar("mostrarComparacion", new Class<?>[0]);
+                comprobar(((DialogoComparacion) campo(ventana, "dialogoComparacion")).isVisible(),
+                    "La comparación completa no se abrió");
+                ((DialogoComparacion) campo(ventana, "dialogoComparacion")).setVisible(false);
+            });
+            captura(1280, "gui-optimizacion.png");
+            captura(900, "gui-optimizacion-compacta.png");
+            SwingUtilities.invokeAndWait(() -> {
+                invocar("restaurarOriginal", new Class<?>[0]);
+                comprobar(editor.getCodigo().equals(originalOptimizacion), "No se restauró el código original");
+                estado("Optimización", EstadoAnalisis.NO_EJECUTADO);
                 invocar("limpiarTodo", new Class<?>[0]);
                 estado("Léxico", EstadoAnalisis.NO_EJECUTADO);
                 estado("Sintáctico", EstadoAnalisis.NO_EJECUTADO);
@@ -359,7 +405,7 @@ public final class GuiRegression {
                 comprobar(lexico.getText().isEmpty(), "Limpiar conservó el reporte léxico anterior");
             });
             SwingUtilities.invokeAndWait(() -> estado("Semántico", EstadoAnalisis.NO_EJECUTADO));
-            System.out.println("GUI PASS: pipeline completo, CI, navegación sin ejecución, AST parcial, invalidación, alfabetos y resaltado por módulo");
+            System.out.println("GUI PASS: pipeline completo, CI, optimización, comparación, restauración, alfabetos y resaltado por módulo");
         } finally { SwingUtilities.invokeAndWait(ventana::dispose); }
     }
 }

@@ -20,6 +20,9 @@ import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.text.Element;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.DefaultHighlighter;
+import javax.swing.text.Highlighter;
 import javax.swing.text.Style;
 import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
@@ -41,6 +44,7 @@ public final class EditorCodigoPanel extends JPanel {
     private final Style estiloBase;
     private final Style estiloLineaError;
     private final Map<String, Style> estilosPorCategoria = new LinkedHashMap<>();
+    private Object resaltadoOptimizacion;
 
     public EditorCodigoPanel() {
         super(new BorderLayout());
@@ -162,6 +166,7 @@ public final class EditorCodigoPanel extends JPanel {
     }
 
     public void setCodigo(String codigo) {
+        limpiarSeleccionOptimizacion();
         texto.setText(codigo);
         texto.setCaretPosition(0);
         actualizarNumeros();
@@ -169,6 +174,30 @@ public final class EditorCodigoPanel extends JPanel {
 
     public void limpiar() {
         setCodigo("");
+    }
+
+    public void seleccionarLineas(int lineaInicio, int lineaFin) {
+        limpiarSeleccionOptimizacion();
+        int inicio = offsetDe(Math.max(1, lineaInicio), 1);
+        int fin = finDeLinea(Math.max(lineaInicio, lineaFin));
+        if (fin <= inicio) fin = Math.min(inicio + 1, documentoEstilado.getLength());
+        try {
+            Highlighter highlighter = texto.getHighlighter();
+            resaltadoOptimizacion = highlighter.addHighlight(inicio, fin,
+                new DefaultHighlighter.DefaultHighlightPainter(Color.decode("#34456b")));
+            texto.setCaretPosition(inicio);
+            var rectangulo = texto.modelToView2D(inicio);
+            if (rectangulo != null) texto.scrollRectToVisible(rectangulo.getBounds());
+        } catch (BadLocationException ex) {
+            throw new IllegalArgumentException("La línea indicada no existe en el editor.", ex);
+        }
+    }
+
+    public void limpiarSeleccionOptimizacion() {
+        if (resaltadoOptimizacion != null) {
+            texto.getHighlighter().removeHighlight(resaltadoOptimizacion);
+            resaltadoOptimizacion = null;
+        }
     }
 
     private void crearEstiloCategoria(String nombre, Color color, boolean negrita, boolean cursiva, boolean subrayado) {

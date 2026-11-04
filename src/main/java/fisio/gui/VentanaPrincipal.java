@@ -12,6 +12,8 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import fisio.optimization.OptimizadorCodigo;
+import fisio.optimization.ResultadoOptimizacion;
 
 /** Documento y presentación en EDT; el coordinador ejecuta las fases en segundo plano. */
 public final class VentanaPrincipal extends JFrame {
@@ -24,20 +26,29 @@ public final class VentanaPrincipal extends JFrame {
     private final PanelSintactico panelSintactico = new PanelSintactico();
     private final PanelSemantico panelSemantico = new PanelSemantico();
     private final PanelCodigoIntermedio panelCodigoIntermedio = new PanelCodigoIntermedio();
+    private final PanelOptimizacion panelOptimizacion = new PanelOptimizacion();
     private final Map<String, PanelModulo> modulos = new LinkedHashMap<>();
     private final CardLayout tarjetas = new CardLayout();
     private final JPanel resultados = new JPanel(tarjetas);
-    private final JList<String> navegacion = new JList<>(new String[]{"Tokens", "Resumen", "Alfabeto FISIO", "Alfabeto Rust", "Léxico", "Sintáctico", "Semántico", "Código Intermedio (CI)"});
+    private final JList<String> navegacion = new JList<>(new String[]{"Tokens", "Resumen", "Alfabeto FISIO",
+        "Alfabeto Rust", "Léxico", "Sintáctico", "Semántico", "Código Intermedio (CI)", "Optimización"});
     private final JComboBox<String> selectorEjemplos = new JComboBox<>();
     private final JLabel lblArchivo = etiqueta("Sin archivo");
     private final JLabel lblCursor = etiqueta("Línea: 1 | Columna: 1");
     private final JLabel lblEstado = etiqueta("Listo · Ejecuta con F5");
-    private final Action ejecutar = accion("Analizar código  F5", this::ejecutarAnalisisCompleto);
+    private final Action ejecutar = accion("Analizar  F5", this::ejecutarAnalisisCompleto);
+    private final Action optimizar = accion("Optimizar  F9", this::ejecutarOptimizacion);
     private Path archivoActual;
     private CoordinadorAnalisis.Resultado ultimoResultado;
     private SwingWorker<CoordinadorAnalisis.Resultado, Void> tarea;
+    private SwingWorker<ResultadoOptimizacion, Void> tareaOptimizacion;
+    private ResultadoOptimizacion ultimaOptimizacion;
+    private PanelOptimizacion.CambioVista cambioOptimizacionSeleccionado;
+    private Path archivoAntesOptimizacion;
+    private DialogoComparacion dialogoComparacion;
     private String codigoEnAnalisis;
     private long generacion;
+    private long generacionOptimizacion;
 
     public VentanaPrincipal() {
         super(TITULO_BASE);
@@ -51,10 +62,14 @@ public final class VentanaPrincipal extends JFrame {
         add(construirStatusBar(), BorderLayout.SOUTH);
         editor.addCambioListener(this::onCodigoModificado);
         editor.addCursorListener((linea, columna) -> lblCursor.setText("Línea: " + linea + " | Columna: " + columna));
+        panelOptimizacion.addSeleccionCambioListener(this::seleccionarCambioOptimizacion);
+        panelOptimizacion.configurarAcciones(this::mostrarComparacion, this::restaurarOriginal,
+            this::guardarOptimizado, this::exportarReporte);
         atajo("F5", "ejecutar", ejecutar);
         atajo("F6", "verSintactico", accion("Sintáctico", () -> seleccionar("Sintáctico")));
         atajo("F7", "verSemantico", accion("Semántico", () -> seleccionar("Semántico")));
         atajo("F8", "verCodigoIntermedio", accion("Código Intermedio", () -> seleccionar("Código Intermedio (CI)")));
+        atajo("F9", "optimizar", optimizar);
         cargarEjemplo("Fundamentos");
     }
 
@@ -106,7 +121,7 @@ public final class VentanaPrincipal extends JFrame {
         archivos.add(Box.createHorizontalStrut(4));
         archivos.add(separador);
         archivos.add(Box.createHorizontalStrut(4));
-        archivos.add(boton(accion("Limpiar editor", this::limpiarTodo), false,
+        archivos.add(boton(accion("Limpiar", this::limpiarTodo), false,
             "Vaciar el editor y los resultados"));
         barra.add(archivos, BorderLayout.WEST);
 
@@ -117,7 +132,7 @@ public final class VentanaPrincipal extends JFrame {
         acciones.add(etiquetaEjemplo);
         selectorEjemplos.addItem("Seleccionar…");
         EjemplosFisio.mapa().keySet().forEach(selectorEjemplos::addItem);
-        selectorEjemplos.setPreferredSize(new Dimension(220, 36));
+        selectorEjemplos.setPreferredSize(new Dimension(190, 36));
         selectorEjemplos.setFont(TemaFisio.fuenteUi(Font.PLAIN, 12));
         selectorEjemplos.setBackground(TemaFisio.BG_MAIN);
         selectorEjemplos.setForeground(TemaFisio.FG_MAIN);
@@ -130,6 +145,7 @@ public final class VentanaPrincipal extends JFrame {
         });
         acciones.add(selectorEjemplos);
         acciones.add(Box.createHorizontalStrut(6));
+        acciones.add(boton(optimizar, false, "Aplicar optimizaciones seguras y explicar cada cambio"));
         acciones.add(boton(ejecutar, true, "Ejecutar todas las fases del analizador"));
         barra.add(acciones, BorderLayout.EAST);
         return barra;
@@ -149,6 +165,7 @@ public final class VentanaPrincipal extends JFrame {
         agregarModulo("Sintáctico", panelSintactico);
         agregarModulo("Semántico", panelSemantico);
         agregarModulo("Código Intermedio (CI)", panelCodigoIntermedio);
+        agregarModulo("Optimización", panelOptimizacion);
         modulos.get("Alfabeto FISIO").actualizar(EstadoAnalisis.CORRECTO, "Referencia del lenguaje anterior de física. No requiere ejecución.", true);
         modulos.get("Alfabeto Rust").actualizar(EstadoAnalisis.CORRECTO, "Referencia léxica del subconjunto Rust-like actual. No requiere ejecución.", true);
         navegacion.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -201,11 +218,12 @@ public final class VentanaPrincipal extends JFrame {
     }
     private void estados(EstadoAnalisis estado, String mensaje, boolean mostrar) {
         modulos.forEach((nombre, modulo) -> {
-            if (!nombre.startsWith("Alfabeto ")) modulo.actualizar(estado, mensaje, mostrar);
+            if (!nombre.startsWith("Alfabeto ") && !nombre.equals("Optimización"))
+                modulo.actualizar(estado, mensaje, mostrar);
         });
     }
     private void ejecutarAnalisisCompleto() {
-        if (tarea != null) return;
+        if (tarea != null || tareaOptimizacion != null) return;
         String codigo = editor.getCodigo();
         long solicitud = ++generacion;
         ultimoResultado = null;
@@ -214,6 +232,7 @@ public final class VentanaPrincipal extends JFrame {
         editor.aplicarResaltado(List.of(), List.of());
         lblEstado.setText("Análisis en curso…");
         ejecutar.setEnabled(false);
+        optimizar.setEnabled(false);
         tarea = new SwingWorker<>() {
             @Override protected CoordinadorAnalisis.Resultado doInBackground() {
                 return new CoordinadorAnalisis().ejecutar(codigo);
@@ -222,6 +241,7 @@ public final class VentanaPrincipal extends JFrame {
                 if (solicitud != generacion) return;
                 tarea = null;
                 ejecutar.setEnabled(true);
+                optimizar.setEnabled(true);
                 if (!codigo.equals(editor.getCodigo())) { marcarDesactualizado(); return; }
                 try {
                     ultimoResultado = get();
@@ -237,6 +257,146 @@ public final class VentanaPrincipal extends JFrame {
             }
         };
         tarea.execute();
+    }
+
+    private void ejecutarOptimizacion() {
+        if (tarea != null || tareaOptimizacion != null) return;
+        String codigo = editor.getCodigo();
+        if (codigo.isBlank()) {
+            modulos.get("Optimización").actualizar(EstadoAnalisis.CON_ERRORES,
+                "El editor está vacío. Escribe o selecciona un ejemplo antes de optimizar.", false);
+            seleccionar("Optimización");
+            return;
+        }
+        cancelarTrabajo();
+        limpiarResultadosAnalisis();
+        long solicitud = ++generacionOptimizacion;
+        modulos.get("Optimización").actualizar(EstadoAnalisis.EN_EJECUCION,
+            "Validando y optimizando una copia del código. El archivo original no se modificará.", false);
+        seleccionar("Optimización");
+        lblEstado.setText("Optimización en curso…");
+        optimizar.setEnabled(false);
+        ejecutar.setEnabled(false);
+        tareaOptimizacion = new SwingWorker<>() {
+            @Override protected ResultadoOptimizacion doInBackground() {
+                return OptimizadorCodigo.optimizar(codigo);
+            }
+            @Override protected void done() {
+                if (solicitud != generacionOptimizacion) return;
+                tareaOptimizacion = null;
+                optimizar.setEnabled(true);
+                ejecutar.setEnabled(true);
+                if (!codigo.equals(editor.getCodigo())) {
+                    modulos.get("Optimización").actualizar(EstadoAnalisis.DESACTUALIZADO,
+                        "El código cambió mientras se optimizaba. Ejecuta nuevamente F9.", false);
+                    return;
+                }
+                try {
+                    ResultadoOptimizacion resultado = get();
+                    presentarOptimizacion(resultado);
+                } catch (CancellationException ex) {
+                    modulos.get("Optimización").actualizar(EstadoAnalisis.DESACTUALIZADO,
+                        "La optimización fue cancelada porque cambió el documento.", false);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    errorOptimizacion(ex);
+                } catch (ExecutionException ex) {
+                    errorOptimizacion(ex.getCause());
+                }
+            }
+        };
+        tareaOptimizacion.execute();
+    }
+
+    private void presentarOptimizacion(ResultadoOptimizacion resultado) {
+        ultimaOptimizacion = resultado;
+        cambioOptimizacionSeleccionado = null;
+        if (!resultado.exitoso()) {
+            panelOptimizacion.poblar(resultado);
+            modulos.get("Optimización").actualizar(EstadoAnalisis.CON_ERRORES,
+                resultado.motivo(), true);
+            seleccionar("Optimización");
+            lblEstado.setText("Optimización bloqueada · " + resultado.motivo());
+            return;
+        }
+        archivoAntesOptimizacion = archivoActual;
+        editor.setCodigo(resultado.codigoOptimizado());
+        panelOptimizacion.poblar(resultado);
+        archivoActual = null;
+        lblArchivo.setText("Código optimizado · sin guardar");
+        setTitle("FISIO — Código optimizado");
+        modulos.get("Optimización").actualizar(EstadoAnalisis.CORRECTO,
+            resultado.cambios().size() + " cambio(s). Tiempo medido: optimizador, no ejecución. "
+                + "Selecciona un cambio para revisarlo.", true);
+        seleccionar("Optimización");
+        lblEstado.setText("Optimización completada · " + resultado.cambios().size()
+            + " cambio(s) · El original se conserva para restaurarlo");
+    }
+
+    private void seleccionarCambioOptimizacion(PanelOptimizacion.CambioVista cambio) {
+        cambioOptimizacionSeleccionado = cambio;
+        if (cambio.lineaOptimizadaInicio() > 0)
+            editor.seleccionarLineas(cambio.lineaOptimizadaInicio(), cambio.lineaOptimizadaFin());
+        else editor.limpiarSeleccionOptimizacion();
+        if (dialogoComparacion != null && dialogoComparacion.isVisible())
+            dialogoComparacion.seleccionarCambio(cambio.numero());
+    }
+
+    private void mostrarComparacion() {
+        if (ultimaOptimizacion == null || !ultimaOptimizacion.exitoso()) return;
+        if (dialogoComparacion == null) dialogoComparacion = new DialogoComparacion(this);
+        dialogoComparacion.mostrar(ultimaOptimizacion.codigoOriginal(), ultimaOptimizacion.codigoOptimizado(),
+            panelOptimizacion.getCambios());
+    }
+
+    private void restaurarOriginal() {
+        if (ultimaOptimizacion == null || !ultimaOptimizacion.exitoso()) return;
+        String original = ultimaOptimizacion.codigoOriginal();
+        Path archivoOriginal = archivoAntesOptimizacion;
+        limpiarResultados();
+        editor.setCodigo(original);
+        archivoActual = archivoOriginal;
+        lblArchivo.setText(archivoActual == null ? "Código original restaurado"
+            : "Archivo: " + archivoActual.getFileName());
+        setTitle(archivoActual == null ? TITULO_BASE : "FISIO — " + archivoActual.getFileName());
+        lblEstado.setText("Código original restaurado · Ejecuta F5 o vuelve a optimizar con F9");
+    }
+
+    private void guardarOptimizado() {
+        if (ultimaOptimizacion != null && ultimaOptimizacion.exitoso()) guardarArchivo();
+    }
+
+    private void exportarReporte() {
+        if (ultimaOptimizacion == null) return;
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Exportar reporte de optimización");
+        chooser.setSelectedFile(new java.io.File("reporte_optimizacion.txt"));
+        chooser.setFileFilter(new FileNameExtensionFilter("Reporte de texto (*.txt)", "txt"));
+        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        Path destino = chooser.getSelectedFile().toPath();
+        if (!destino.getFileName().toString().contains("."))
+            destino = destino.resolveSibling(destino.getFileName() + ".txt");
+        if (Files.exists(destino) && JOptionPane.showConfirmDialog(this,
+                "El reporte ya existe:\n" + destino + "\n¿Deseas sobrescribirlo?",
+                "Confirmar sobrescritura", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
+                != JOptionPane.YES_OPTION) return;
+        try {
+            Files.writeString(destino, ultimaOptimizacion.reporteTexto(), StandardCharsets.UTF_8);
+            JOptionPane.showMessageDialog(this, "Reporte guardado:\n" + destino,
+                "Reporte exportado", JOptionPane.INFORMATION_MESSAGE);
+        } catch (IOException ex) {
+            LOG.log(System.Logger.Level.ERROR, "No se pudo exportar " + destino, ex);
+            JOptionPane.showMessageDialog(this, "No se pudo guardar el reporte:\n" + destino,
+                "Error al exportar", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void errorOptimizacion(Throwable ex) {
+        Throwable causa = ex == null ? new IllegalStateException("Causa no disponible") : ex;
+        LOG.log(System.Logger.Level.ERROR, "No se pudo completar la optimización", causa);
+        modulos.get("Optimización").actualizar(EstadoAnalisis.ERROR_INTERNO,
+            "No se pudo optimizar por un error interno. " + causa.getClass().getSimpleName(), false);
+        lblEstado.setText("Error interno durante la optimización");
     }
     private void errorInterno(Throwable ex) {
         Throwable causa = ex == null ? new IllegalStateException("Causa no disponible") : ex;
@@ -273,13 +433,20 @@ public final class VentanaPrincipal extends JFrame {
     }
     /** Conserva los colores de tokens; solo la fase visible marca sus errores. */
     private void actualizarResaltado() {
+        String modulo = navegacion.getSelectedValue();
+        if ("Optimización".equals(modulo) && cambioOptimizacionSeleccionado != null
+                && cambioOptimizacionSeleccionado.lineaOptimizadaInicio() > 0) {
+            editor.seleccionarLineas(cambioOptimizacionSeleccionado.lineaOptimizadaInicio(),
+                cambioOptimizacionSeleccionado.lineaOptimizadaFin());
+        } else if (!"Optimización".equals(modulo)) {
+            editor.limpiarSeleccionOptimizacion();
+        }
         var r = ultimoResultado;
         if (r == null || !r.codigo().equals(editor.getCodigo())
                 || modulos.get("Tokens").estadoActual == EstadoAnalisis.DESACTUALIZADO) {
             editor.aplicarResaltado(List.of(), List.of());
             return;
         }
-        String modulo = navegacion.getSelectedValue();
         if ("Léxico".equals(modulo)) editor.aplicarResaltado(r.lexico().tokens(), r.lexico().errores());
         else if ("Sintáctico".equals(modulo) && r.sintactico() != null)
             editor.aplicarResaltadoSintactico(r.lexico().tokens(), r.sintactico().errores());
@@ -289,6 +456,11 @@ public final class VentanaPrincipal extends JFrame {
     }
     private void onCodigoModificado() {
         if (codigoEnAnalisis != null && !codigoEnAnalisis.equals(editor.getCodigo())) marcarDesactualizado();
+        if (ultimaOptimizacion != null && ultimaOptimizacion.exitoso()
+                && !ultimaOptimizacion.codigoOptimizado().equals(editor.getCodigo())) {
+            modulos.get("Optimización").actualizar(EstadoAnalisis.DESACTUALIZADO,
+                "El código optimizado fue editado. El reporte conserva la última optimización aplicada.", true);
+        }
     }
     private void marcarDesactualizado() {
         cancelarTrabajo();
@@ -301,8 +473,18 @@ public final class VentanaPrincipal extends JFrame {
         if (tarea != null) tarea.cancel(true);
         tarea = null;
         ejecutar.setEnabled(true);
+        if (tareaOptimizacion == null) optimizar.setEnabled(true);
     }
-    private void limpiarResultados() {
+
+    private void cancelarOptimizacion() {
+        ++generacionOptimizacion;
+        if (tareaOptimizacion != null) tareaOptimizacion.cancel(true);
+        tareaOptimizacion = null;
+        optimizar.setEnabled(true);
+        ejecutar.setEnabled(true);
+    }
+
+    private void limpiarResultadosAnalisis() {
         cancelarTrabajo();
         ultimoResultado = null;
         codigoEnAnalisis = null;
@@ -316,8 +498,28 @@ public final class VentanaPrincipal extends JFrame {
         editor.aplicarResaltado(List.of(), List.of());
         lblEstado.setText("Léxico: no ejecutado   |   Sintáctico: no ejecutado   |   Semántico: no ejecutado   |   CI: no ejecutado");
     }
+
+    private void limpiarOptimizacion() {
+        cancelarOptimizacion();
+        ultimaOptimizacion = null;
+        cambioOptimizacionSeleccionado = null;
+        archivoAntesOptimizacion = null;
+        panelOptimizacion.limpiar();
+        modulos.get("Optimización").actualizar(EstadoAnalisis.NO_EJECUTADO,
+            "Todavía no se ha optimizado el código. Pulsa Optimizar (F9).", false);
+        editor.limpiarSeleccionOptimizacion();
+        if (dialogoComparacion != null) dialogoComparacion.setVisible(false);
+    }
+
+    private void limpiarResultados() {
+        limpiarResultadosAnalisis();
+        limpiarOptimizacion();
+    }
+
     @Override public void dispose() {
         cancelarTrabajo();
+        cancelarOptimizacion();
+        if (dialogoComparacion != null) dialogoComparacion.dispose();
         super.dispose();
     }
     private void abrirArchivo() {
