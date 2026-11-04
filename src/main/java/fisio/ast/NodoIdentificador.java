@@ -2,6 +2,6 @@ package fisio.ast;
 
 import fisio.token.TokenFisio;
 
-/** Equivalente de NodoIdentificador(NodoAST): token: Token. */
+/** Uso de un identificador como expresión. */
 public record NodoIdentificador(int linea, int columna, TokenFisio token) implements NodoAST {
 }

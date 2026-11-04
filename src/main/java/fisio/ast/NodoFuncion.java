@@ -8,6 +8,7 @@ import fisio.token.TokenFisio;
 public record NodoFuncion(
         int linea,
         int columna,
+        boolean publico,
         TokenFisio nombre,
         List<NodoParametroFuncion> parametros,
         TokenFisio tipoRetorno,

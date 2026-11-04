@@ -35,7 +35,7 @@ public final class PanelSintactico extends JPanel {
         texto.setForeground(TemaFisio.FG_MAIN);
         texto.setCaretColor(TemaFisio.ACCENT);
         texto.setSelectionColor(TemaFisio.BORDER);
-        texto.setFont(TemaFisio.fuenteMono(Font.PLAIN, 12)); // Letra un poco más grande
+        texto.setFont(TemaFisio.fuenteMono(Font.PLAIN, 12));
         texto.setBorder(BorderFactory.createEmptyBorder(12, 14, 12, 14));
 
         JScrollPane scroll = new JScrollPane(texto);
@@ -68,7 +68,6 @@ public final class PanelSintactico extends JPanel {
 
             doc.insertString(doc.getLength(), "============ REPORTE DE ANÁLISIS SINTÁCTICO ============\n\n", estiloTitulo);
 
-            // 1. Mostrar TODOS los errores encontrados al mismo tiempo
             if (!errores.isEmpty()) {
                 doc.insertString(doc.getLength(), "❌ SE ENCONTRARON " + errores.size() + " ERROR(ES):\n", estiloError);
                 for (ErrorSintactico err : errores) {
@@ -84,7 +83,6 @@ public final class PanelSintactico extends JPanel {
                 doc.insertString(doc.getLength(), "Estructuras validadas exitosamente:\n", estiloTitulo);
             }
 
-            // 2. Conservar el checklist y mostrar también el árbol completo o recuperado.
             recorrerYValidar(ast, doc);
             doc.insertString(doc.getLength(), errores.isEmpty() ? "\nAST\n" : "\nAST parcial recuperado\n", estiloTitulo);
             doc.insertString(doc.getLength(), String.join("\n", FormateadorAst.formatear(ast)), estiloDim);
@@ -95,38 +93,22 @@ public final class PanelSintactico extends JPanel {
         }
     }
 
-    // Recorrer solo nodos y listas; tokens y valores escalares son hojas.
     private void recorrerYValidar(Object obj, StyledDocument doc) throws BadLocationException {
         if (obj == null) return;
-        
-        // Si es una lista, iteramos sobre sus elementos
-        if (obj instanceof List) {
-            for (Object item : (List<?>) obj) {
-                recorrerYValidar(item, doc);
-            }
+
+        if (obj instanceof List<?> lista) {
+            for (Object item : lista) recorrerYValidar(item, doc);
             return;
         }
 
-        if (!(obj instanceof NodoAST)) return;
-
-        String clase = obj.getClass().getSimpleName();
-        String mensaje = switch (clase) {
-            case "NodoFuncion" -> "Estructura de Función (fn)";
-            case "NodoDeclaracion" -> "Declaración de variable (let)";
-            case "NodoAsignacion" -> "Operación de Asignación (=, +=, -=)";
-            case "NodoIf" -> "Estructura condicional (if / else)";
-            case "NodoWhile" -> "Ciclo (while)";
-            case "NodoFor" -> "Ciclo (for .. in)";
-            case "NodoInvocacionMacro" -> "Invocación de Macro (ej. println!)";
-            case "NodoLlamadaFuncion" -> "Llamada a una función";
-            case "NodoReturn" -> "Sentencia de retorno (return)";
-            default -> "";
-        };
-
-        if (!mensaje.isEmpty()) {
-            doc.insertString(doc.getLength(), "  ✔️ Se validó correctamente: " + mensaje + "\n", estiloDim);
+        if (obj instanceof NodoAST) {
+            String mensaje = descripcionNodo(obj.getClass().getSimpleName());
+            if (!mensaje.isEmpty()) {
+                doc.insertString(doc.getLength(), "  ✔️ Se validó correctamente: " + mensaje + "\n", estiloDim);
+            }
         }
 
+        if (!obj.getClass().isRecord()) return;
         for (java.lang.reflect.RecordComponent componente : obj.getClass().getRecordComponents()) {
             try {
                 Object hijo = componente.getAccessor().invoke(obj);
@@ -135,6 +117,29 @@ public final class PanelSintactico extends JPanel {
                 throw new IllegalStateException("No se pudo recorrer el AST.", e);
             }
         }
+    }
+
+    private static String descripcionNodo(String clase) {
+        return switch (clase) {
+            case "NodoFuncion" -> "Estructura de Función (fn)";
+            case "NodoDeclaracion" -> "Declaración de variable (let)";
+            case "NodoLetElse" -> "Declaración refutable con salida obligatoria (let else)";
+            case "NodoAsignacion" -> "Operación de Asignación (=, +=, -=)";
+            case "NodoIf" -> "Estructura condicional (if / else)";
+            case "NodoIfLet" -> "Condicional con patrón (if let)";
+            case "NodoWhile" -> "Ciclo (while)";
+            case "NodoWhileLet" -> "Ciclo con patrón (while let)";
+            case "NodoFor" -> "Ciclo (for .. in)";
+            case "NodoInvocacionMacro" -> "Invocación de Macro (ej. println!)";
+            case "NodoLlamadaFuncion" -> "Llamada a una función";
+            case "NodoImpl" -> "Bloque de implementación impl";
+            case "NodoLlamadaAsociada" -> "Llamada a función asociada";
+            case "NodoLlamadaMetodo" -> "Llamada a método";
+            case "NodoTrait" -> "Definición de trait";
+            case "NodoFirmaTrait" -> "Firma de método de trait";
+            case "NodoReturn" -> "Sentencia de retorno (return)";
+            default -> "";
+        };
     }
 
     private static String lexemaError(ErrorSintactico err) {

@@ -15,11 +15,37 @@ import fisio.ast.NodoAST;
 import fisio.ast.NodoAgrupacion;
 import fisio.ast.NodoAsignacion;
 import fisio.ast.NodoBloque;
+import fisio.ast.NodoBreak;
+import fisio.ast.NodoContinue;
+import fisio.ast.NodoConversion;
+import fisio.ast.NodoStruct;
+import fisio.ast.NodoEnum;
+import fisio.ast.NodoLiteralStruct;
+import fisio.ast.NodoLiteralVariante;
+import fisio.ast.NodoAccesoCampo;
+import fisio.ast.NodoVarianteEnum;
+import fisio.ast.NodoMatch;
+import fisio.ast.NodoArreglo;
+import fisio.ast.NodoTupla;
+import fisio.ast.NodoIndice;
+import fisio.ast.NodoAccesoTupla;
+import fisio.ast.NodoConstante;
+import fisio.ast.NodoAliasTipo;
+import fisio.ast.NodoEstatico;
+import fisio.ast.NodoReferencia;
+import fisio.ast.NodoDesreferencia;
+import fisio.ast.NodoImpl;
+import fisio.ast.NodoLlamadaAsociada;
+import fisio.ast.NodoLlamadaMetodo;
+import fisio.ast.NodoTrait;
+import fisio.ast.NodoFirmaTrait;
 import fisio.ast.NodoDeclaracion;
+import fisio.ast.NodoLetElse;
 import fisio.ast.NodoFor;
 import fisio.ast.NodoFuncion;
 import fisio.ast.NodoIdentificador;
 import fisio.ast.NodoIf;
+import fisio.ast.NodoIfLet;
 import fisio.ast.NodoInvocacionMacro;
 import fisio.ast.NodoLlamadaFuncion;
 import fisio.ast.NodoLoop;
@@ -32,12 +58,15 @@ import fisio.ast.NodoPrograma;
 import fisio.ast.NodoRango;
 import fisio.ast.NodoReturn;
 import fisio.ast.NodoWhile;
+import fisio.ast.NodoWhileLet;
+import fisio.ast.PatronVariante;
 import fisio.token.CategoriaToken;
 import fisio.token.MapeoTokens;
 import fisio.token.TokenFisio;
 
 public class FisioParser {
     private List<ErrorSintactico> listaErrores = new ArrayList<>();
+    private int profundidadCabeceraControl;
 
     public List<ErrorSintactico> errores() {
         return this.listaErrores;
@@ -96,8 +125,161 @@ public class FisioParser {
     }
 
     private boolean esInicioExpresion(int kind) {
-        return kind == NUM || kind == STRING || kind == TRUE || kind == FALSE
-            || kind == ID || kind == PAREN_IZQ || kind == MENOS || kind == NEGACION;
+        return kind == NUM || kind == STRING || kind == CHAR || kind == TRUE || kind == FALSE
+            || kind == ID || kind == PAREN_IZQ || kind == LLAVE_IZQ || kind == IF || kind == MATCH
+            || kind == CORCHETE_IZQ || kind == MENOS || kind == NEGACION
+            || kind == AMPERSAND || kind == MULT;
+    }
+
+    private boolean esInicioTipo(int kind) {
+        return kind == ID || kind == CORCHETE_IZQ || kind == PAREN_IZQ || kind == AMPERSAND;
+    }
+
+    private boolean esInicioItem(int kind) {
+        return kind == FN || kind == STRUCT || kind == ENUM || kind == TRAIT || kind == IMPL || kind == CONST || kind == STATIC
+            || kind == TYPE || kind == PUB;
+    }
+
+    private boolean esItemSoloSuperior(int kind) {
+        return kind == FN || kind == STRUCT || kind == ENUM || kind == TRAIT || kind == IMPL || kind == TYPE || kind == PUB;
+    }
+
+    /** Desambigua `Tipo { campo: valor }` de un identificador seguido por un bloque. */
+    private boolean sigueLiteralStruct(Token nombre) {
+        if (getToken(1).kind != LLAVE_IZQ) return false;
+        if (getToken(2).kind == ID && getToken(3).kind == DOS_PUNTOS) return true;
+        if (profundidadCabeceraControl > 0) return false;
+        boolean nombreTipo = !nombre.image.isEmpty() && Character.isUpperCase(nombre.image.codePointAt(0));
+        return nombreTipo && (getToken(2).kind == LLAVE_DER || getToken(2).kind == RANGO
+            || getToken(2).kind == ID && (getToken(3).kind == COMA || getToken(3).kind == LLAVE_DER));
+    }
+
+    /** Distingue `Tipo::Variante { campo: valor }` de la llave que abre un `match`. */
+    private boolean sigueLiteralVarianteNombrada() {
+        if (getToken(1).kind != LLAVE_IZQ) return false;
+        if (getToken(2).kind == ID && getToken(3).kind == DOS_PUNTOS) return true;
+        if (profundidadCabeceraControl > 0) return false;
+        return getToken(2).kind == LLAVE_DER
+            || getToken(2).kind == ID && (getToken(3).kind == COMA || getToken(3).kind == LLAVE_DER);
+    }
+
+    /** Lee la sintaxis común de patrones usada por match, if let y while let. */
+    private PatronVariante leerPatronVariante() {
+        Token inicio = getToken(1);
+        boolean comodin = inicio.kind == ID && "_".equals(inicio.image);
+        Token tipoTok = null;
+        Token varianteTok = null;
+        List<TokenFisio> vinculaciones = new ArrayList<TokenFisio>();
+        List<PatronVariante.Elemento> elementos = new ArrayList<PatronVariante.Elemento>();
+        List<NodoMatch.VinculacionCampo> campos = new ArrayList<NodoMatch.VinculacionCampo>();
+        NodoMatch.FormaPatron forma = comodin
+            ? NodoMatch.FormaPatron.COMODIN : NodoMatch.FormaPatron.UNITARIO;
+        boolean resto = false;
+        if (comodin) {
+            getNextToken();
+        } else {
+            if (inicio.kind != ID) {
+                registrarError("Se esperaba un patrón Tipo::Variante o '_'");
+                return null;
+            }
+            tipoTok = getNextToken();
+            if (!coincidirToken(DOBLE_DOS_PUNTOS) || getToken(1).kind != ID) {
+                registrarError("Se esperaba un patrón Tipo::Variante");
+                return null;
+            }
+            varianteTok = getNextToken();
+            if (coincidirToken(PAREN_IZQ)) {
+                forma = NodoMatch.FormaPatron.TUPLA;
+                while (getToken(1).kind != PAREN_DER && getToken(1).kind != EOF) {
+                    if (getToken(1).kind == RANGO) {
+                        getNextToken();
+                        resto = true;
+                        if (getToken(1).kind == COMA) getNextToken();
+                        if (getToken(1).kind != PAREN_DER) {
+                            registrarError("'..' debe ser el último elemento del patrón posicional");
+                            return null;
+                        }
+                        break;
+                    }
+                    if (getToken(1).kind != ID) {
+                        registrarError("Se esperaba un nombre, '_' o patrón anidado en la variante");
+                        return null;
+                    }
+                    if (getToken(2).kind == DOBLE_DOS_PUNTOS) {
+                        PatronVariante anidado = leerPatronVariante();
+                        if (anidado == null) return null;
+                        elementos.add(PatronVariante.Elemento.anidado(anidado));
+                    } else {
+                        TokenFisio nombre = tokenFisioDe(getNextToken());
+                        vinculaciones.add(nombre);
+                        elementos.add(PatronVariante.Elemento.vinculacion(nombre));
+                    }
+                    if (getToken(1).kind == COMA) {
+                        getNextToken();
+                        if (getToken(1).kind == PAREN_DER) break;
+                    } else if (getToken(1).kind != PAREN_DER) {
+                        registrarError("Se esperaba ',' entre vinculaciones del patrón");
+                        return null;
+                    }
+                }
+                if (!coincidirToken(PAREN_DER)) {
+                    registrarError("Se esperaba ')' para cerrar el patrón de variante");
+                    return null;
+                }
+            } else if (coincidirToken(LLAVE_IZQ)) {
+                forma = NodoMatch.FormaPatron.ESTRUCTURA;
+                while (getToken(1).kind != LLAVE_DER && getToken(1).kind != EOF) {
+                    if (getToken(1).kind == RANGO) {
+                        getNextToken();
+                        resto = true;
+                        if (getToken(1).kind == COMA) getNextToken();
+                        if (getToken(1).kind != LLAVE_DER) {
+                            registrarError("'..' debe ser el último elemento del patrón con campos");
+                            return null;
+                        }
+                        break;
+                    }
+                    if (getToken(1).kind != ID) {
+                        registrarError("Se esperaba el nombre de un campo en el patrón");
+                        return null;
+                    }
+                    Token campoTok = getNextToken();
+                    Token vinculacionTok = campoTok;
+                    PatronVariante patronCampo = null;
+                    if (coincidirToken(DOS_PUNTOS)) {
+                        if (getToken(1).kind != ID) {
+                            registrarError("Se esperaba un nombre, '_' o patrón anidado después de ':'");
+                            return null;
+                        }
+                        if (getToken(2).kind == DOBLE_DOS_PUNTOS) {
+                            patronCampo = leerPatronVariante();
+                            if (patronCampo == null) return null;
+                            vinculacionTok = null;
+                        } else {
+                            vinculacionTok = getNextToken();
+                        }
+                    }
+                    campos.add(patronCampo == null
+                        ? new NodoMatch.VinculacionCampo(tokenFisioDe(campoTok), tokenFisioDe(vinculacionTok))
+                        : new NodoMatch.VinculacionCampo(tokenFisioDe(campoTok), patronCampo));
+                    if (getToken(1).kind == COMA) {
+                        getNextToken();
+                        if (getToken(1).kind == LLAVE_DER) break;
+                    } else if (getToken(1).kind != LLAVE_DER) {
+                        registrarError("Se esperaba ',' entre campos del patrón");
+                        return null;
+                    }
+                }
+                if (!coincidirToken(LLAVE_DER)) {
+                    registrarError("Se esperaba '}' para cerrar el patrón de variante");
+                    return null;
+                }
+            }
+        }
+        return new PatronVariante(inicio.beginLine, inicio.beginColumn, comodin,
+            tipoTok == null ? null : tokenFisioDe(tipoTok),
+            varianteTok == null ? null : tokenFisioDe(varianteTok),
+            vinculaciones, elementos, campos, forma, resto);
     }
 
     /* Recuperacion local: no consumir el cierre ni el limite de sentencia.
@@ -106,7 +288,7 @@ public class FisioParser {
         int parentesis = 0;
         while (true) {
             int k = getToken(1).kind;
-            if (k == EOF || k == FN || k == PUNTO_COMA || k == LLAVE_IZQ || k == LLAVE_DER
+            if (k == EOF || esInicioItem(k) || k == PUNTO_COMA || k == LLAVE_IZQ || k == LLAVE_DER
                     || (parentesis == 0 && (k == COMA || k == PAREN_DER))) {
                 return;
             }
@@ -120,7 +302,8 @@ public class FisioParser {
        el cierre de la funcion: conservar '{' para que Bloque lo analice. */
     private void sincronizarCabeceraControl() {
         while (getToken(1).kind != EOF && getToken(1).kind != PUNTO_COMA
-                && getToken(1).kind != LLAVE_IZQ && getToken(1).kind != LLAVE_DER && getToken(1).kind != FN) {
+                && getToken(1).kind != LLAVE_IZQ && getToken(1).kind != LLAVE_DER
+                && !esInicioItem(getToken(1).kind)) {
             getNextToken();
         }
     }
@@ -130,9 +313,9 @@ public class FisioParser {
         int llaves = 0;
         while (true) {
             int k = getToken(1).kind;
-            if (k == EOF || k == FN) return;
-            if (llaves == 0 && (k == LLAVE_DER || k == LET || k == IF || k == WHILE
-                    || k == FOR || k == LOOP || k == RETURN)) return;
+            if (k == EOF || esInicioItem(k)) return;
+            if (llaves == 0 && (k == LLAVE_DER || k == LET || k == IF || k == MATCH || k == WHILE
+                    || k == FOR || k == LOOP || k == RETURN || k == BREAK || k == CONTINUE)) return;
             getNextToken();
             if (k == LLAVE_IZQ) llaves++;
             else if (k == LLAVE_DER && --llaves == 0) return;
@@ -140,10 +323,10 @@ public class FisioParser {
         }
     }
 
-    /** Salta una función dañada sin consumir la siguiente cabecera fn. */
+    /** Salta un item dañado sin consumir la siguiente cabecera de nivel superior. */
     private void sincronizarFuncion() {
         int llaves = 0;
-        while (getToken(1).kind != EOF && getToken(1).kind != FN) {
+        while (getToken(1).kind != EOF && !esInicioItem(getToken(1).kind)) {
             int k = getNextToken().kind;
             if (k == LLAVE_IZQ) llaves++;
             if (k == LLAVE_DER && --llaves <= 0) return;
@@ -151,10 +334,40 @@ public class FisioParser {
     }
 
     private boolean esAsignacion() {
-        if (getToken(1).kind != ID) return false;
-        int k = getToken(2).kind;
+        int desplazamiento = 1;
+        while (getToken(desplazamiento).kind == MULT) desplazamiento++;
+        if (getToken(desplazamiento).kind != ID) return false;
+        desplazamiento++;
+        while (true) {
+            if (getToken(desplazamiento).kind == PUNTO
+                    && (getToken(desplazamiento + 1).kind == ID
+                        || getToken(desplazamiento + 1).kind == NUM)) {
+                desplazamiento += 2;
+                continue;
+            }
+            if (getToken(desplazamiento).kind == CORCHETE_IZQ) {
+                int profundidad = 1;
+                desplazamiento++;
+                while (profundidad > 0 && getToken(desplazamiento).kind != EOF) {
+                    int k = getToken(desplazamiento).kind;
+                    if (k == CORCHETE_IZQ) profundidad++;
+                    else if (k == CORCHETE_DER) profundidad--;
+                    desplazamiento++;
+                }
+                if (profundidad > 0) return false;
+                continue;
+            }
+            break;
+        }
+        int k = getToken(desplazamiento).kind;
+        return esOperadorAsignacion(k);
+    }
+
+    private boolean esOperadorAsignacion(int k) {
         return k == ASIGNACION || k == MAS_IGUAL || k == MENOS_IGUAL
-            || k == MULT_IGUAL || k == DIV_IGUAL || k == MOD_IGUAL;
+            || k == MULT_IGUAL || k == DIV_IGUAL || k == MOD_IGUAL
+            || k == SHIFT_IZQ_IGUAL || k == SHIFT_DER_IGUAL
+            || k == AND_BIT_IGUAL || k == OR_BIT_IGUAL || k == XOR_BIT_IGUAL;
     }
 
 }
@@ -295,7 +508,11 @@ TOKEN : {
     < ID: ["a"-"z", "A"-"Z", "_"] ( ["a"-"z", "A"-"Z", "_", "0"-"9"] )* >
   | < NUM: (["0"-"9"])+ ("." (["0"-"9"])+)? >
   | < STRING: "\"" (~["\"", "\\"] | "\\" ["n", "r", "t", "0", "\\", "\"", "'"])* "\"" >
+  | < CHAR: "'" (~["'", "\\", "\r", "\n"]
+        | ["\uD800"-"\uDBFF"] ["\uDC00"-"\uDFFF"]
+        | "\\" ["n", "r", "t", "0", "\\", "'", "\""]) "'" >
   | < CADENA_INVALIDA: "\"" (~["\"", "\\", "\r", "\n"] | "\\" ~["\r", "\n"])* ("\"" | "\\")? >
+  | < CARACTER_INVALIDO: "'" (~["'", "\r", "\n"] | "\\" ~["\r", "\n"])* ("'" | "\\")? >
   | < NUMERO_INVALIDO: (["0"-"9"])+ ("." (["0"-"9"])+)? ["a"-"z", "A"-"Z", "_"] (["a"-"z", "A"-"Z", "_", "0"-"9"])* >
 }
 
@@ -311,27 +528,628 @@ TOKEN : {
    ========================================================================= */
 
 NodoPrograma Programa():
-{ List<NodoAST> funciones = new ArrayList<NodoAST>(); }
+{ List<NodoAST> items = new ArrayList<NodoAST>(); boolean publico; }
 {
     {
         while (getToken(1).kind != EOF) {
-            if (getToken(1).kind == FN) {
-                NodoAST funcion = Funcion();
-                if (funcion != null) funciones.add(funcion);
-            } else {
-                registrarError("Se esperaba 'fn' o fin de archivo");
-                do { getNextToken(); } while (getToken(1).kind != EOF && getToken(1).kind != FN);
+            NodoAST item = null;
+            publico = coincidirToken(PUB);
+            if (getToken(1).kind == FN) item = Funcion(publico, null);
+            else if (getToken(1).kind == STRUCT) item = DefinicionStruct(publico);
+            else if (getToken(1).kind == ENUM) item = DefinicionEnum(publico);
+            else if (getToken(1).kind == TRAIT) item = DefinicionTrait(publico);
+            else if (getToken(1).kind == IMPL) {
+                if (publico) registrarError("Un bloque impl no puede declararse con 'pub'");
+                item = DefinicionImpl();
             }
+            else if (getToken(1).kind == CONST) item = Constante(publico);
+            else if (getToken(1).kind == STATIC) item = Estatico(publico);
+            else if (getToken(1).kind == TYPE) item = AliasTipo(publico);
+            else {
+                registrarError(publico
+                    ? "Se esperaba 'fn', 'struct', 'enum', 'trait', 'const', 'static' o 'type' despues de 'pub'"
+                    : "Se esperaba 'fn', 'struct', 'enum', 'trait', 'impl', 'const', 'static', 'type' o fin de archivo");
+                do { getNextToken(); } while (getToken(1).kind != EOF && !esInicioItem(getToken(1).kind));
+            }
+            if (item != null) items.add(item);
         }
     }
     <EOF>
-    { return new NodoPrograma(1, 1, funciones); }
+    { return new NodoPrograma(1, 1, items); }
 }
 
-NodoAST Funcion():
+NodoAST Estatico(boolean publico):
+{
+    Token staticTok;
+    Token nombreTok;
+    TokenFisio tipoFisio;
+    NodoAST expresion;
+    boolean mutable = false;
+}
+{
+    staticTok=<STATIC>
+    { if (coincidirToken(MUT)) mutable = true; }
+    {
+        if (getToken(1).kind != ID) {
+            registrarError("Se esperaba el nombre del elemento static");
+            sincronizar();
+            return null;
+        }
+        nombreTok = getNextToken();
+        if (!coincidirToken(DOS_PUNTOS)) {
+            registrarError("Los elementos static requieren una anotacion de tipo");
+            sincronizar();
+            return null;
+        }
+        if (!esInicioTipo(getToken(1).kind)) {
+            registrarError("Se esperaba el tipo del elemento static");
+            sincronizar();
+            return null;
+        }
+        tipoFisio = TipoFuente();
+        if (tipoFisio == null) { sincronizar(); return null; }
+        if (!coincidirToken(ASIGNACION)) {
+            registrarError("Se esperaba '=' en el elemento static");
+            sincronizar();
+            return null;
+        }
+        if (!esInicioExpresion(getToken(1).kind)) {
+            registrarError("Se esperaba un inicializador para el elemento static");
+            sincronizar();
+            return null;
+        }
+        expresion = Expresion();
+        if (expresion == null) { sincronizar(); return null; }
+        if (!coincidirToken(PUNTO_COMA)) {
+            registrarError("Se esperaba ';' al final del elemento static");
+            sincronizar();
+        }
+        TokenFisio tf = tokenFisioDe(staticTok);
+        return new NodoEstatico(tf.linea(), tf.columna(), publico, mutable,
+            tokenFisioDe(nombreTok), tipoFisio, expresion);
+    }
+}
+
+NodoAST AliasTipo(boolean publico):
+{
+    Token typeTok;
+    Token nombreTok;
+    TokenFisio tipoFisio;
+}
+{
+    typeTok=<TYPE>
+    {
+        if (getToken(1).kind != ID) {
+            registrarError("Se esperaba el nombre del alias despues de 'type'");
+            sincronizarFuncion();
+            return null;
+        }
+        nombreTok = getNextToken();
+        if (!coincidirToken(ASIGNACION)) {
+            registrarError("Se esperaba '=' despues del nombre del alias");
+            sincronizarFuncion();
+            return null;
+        }
+        if (!esInicioTipo(getToken(1).kind)) {
+            registrarError("Se esperaba el tipo asociado al alias");
+            sincronizarFuncion();
+            return null;
+        }
+        tipoFisio = TipoFuente();
+        if (tipoFisio == null) {
+            sincronizarFuncion();
+            return null;
+        }
+        if (!coincidirToken(PUNTO_COMA)) {
+            registrarError("Se esperaba ';' al final del alias de tipo");
+            sincronizarFuncion();
+        }
+        TokenFisio tf = tokenFisioDe(typeTok);
+        return new NodoAliasTipo(tf.linea(), tf.columna(), publico, tokenFisioDe(nombreTok), tipoFisio);
+    }
+}
+
+NodoAST Constante(boolean publico):
+{
+    Token constTok;
+    Token nombreTok;
+    TokenFisio tipoFisio;
+    NodoAST expresion;
+}
+{
+    constTok=<CONST>
+    {
+        if (getToken(1).kind != ID) {
+            registrarError("Se esperaba el nombre de la constante despues de 'const'");
+            sincronizar();
+            return null;
+        }
+        nombreTok = getNextToken();
+        if (!coincidirToken(DOS_PUNTOS)) {
+            registrarError("Las constantes requieren una anotacion de tipo despues del nombre");
+            sincronizar();
+            return null;
+        }
+        if (!esInicioTipo(getToken(1).kind)) {
+            registrarError("Se esperaba el tipo de la constante");
+            sincronizar();
+            return null;
+        }
+        tipoFisio = TipoFuente();
+        if (tipoFisio == null) {
+            sincronizar();
+            return null;
+        }
+        if (!coincidirToken(ASIGNACION)) {
+            registrarError("Se esperaba '=' en la constante");
+            sincronizar();
+            return null;
+        }
+        if (!esInicioExpresion(getToken(1).kind)) {
+            registrarError("Se esperaba un valor para la constante");
+            sincronizar();
+            return null;
+        }
+        expresion = Expresion();
+        if (expresion == null) {
+            sincronizar();
+            return null;
+        }
+        if (!coincidirToken(PUNTO_COMA)) {
+            registrarError("Se esperaba ';' al final de la constante");
+            sincronizar();
+        }
+        TokenFisio tf = tokenFisioDe(constTok);
+        return new NodoConstante(tf.linea(), tf.columna(), publico,
+            tokenFisioDe(nombreTok), tipoFisio, expresion);
+    }
+}
+
+NodoAST DefinicionStruct(boolean publico):
+{
+    Token structTok;
+    Token nombreTok;
+    List<NodoStruct.Campo> campos = new ArrayList<NodoStruct.Campo>();
+}
+{
+    structTok=<STRUCT>
+    {
+        if (getToken(1).kind != ID) {
+            registrarError("Se esperaba el nombre del struct");
+            sincronizarFuncion();
+            return null;
+        }
+        nombreTok = getNextToken();
+        if (coincidirToken(PAREN_IZQ)) {
+            int indiceCampo = 0;
+            while (getToken(1).kind != PAREN_DER && getToken(1).kind != EOF) {
+                boolean campoPublico = coincidirToken(PUB);
+                if (!esInicioTipo(getToken(1).kind)) {
+                    registrarError("Se esperaba el tipo de un campo posicional");
+                    sincronizarArgumento();
+                    break;
+                }
+                TokenFisio tipoFisio = TipoFuente();
+                TokenFisio nombreCampo = new TokenFisio(String.valueOf(indiceCampo++),
+                    CategoriaToken.ID, "CAMPO_TUPLA", tipoFisio.linea(), tipoFisio.columna());
+                if (tipoFisio != null) campos.add(new NodoStruct.Campo(nombreCampo, tipoFisio, campoPublico));
+                if (getToken(1).kind == COMA) {
+                    getNextToken();
+                    if (getToken(1).kind == PAREN_DER) break;
+                } else if (getToken(1).kind != PAREN_DER) {
+                    registrarError("Se esperaba ',' entre campos posicionales");
+                    break;
+                }
+            }
+            if (!coincidirToken(PAREN_DER)) registrarError("Se esperaba ')' para cerrar el struct de tupla");
+            if (!coincidirToken(PUNTO_COMA)) registrarError("Se esperaba ';' después del struct de tupla");
+            TokenFisio tf = tokenFisioDe(structTok);
+            return new NodoStruct(tf.linea(), tf.columna(), publico, tokenFisioDe(nombreTok), campos, true);
+        }
+        if (!coincidirToken(LLAVE_IZQ)) {
+            registrarError("Se esperaba '{' despues del nombre del struct");
+            sincronizarFuncion();
+            return null;
+        }
+        while (getToken(1).kind != LLAVE_DER && getToken(1).kind != EOF
+                && getToken(1).kind != FN && getToken(1).kind != STRUCT
+                && getToken(1).kind != ENUM && getToken(1).kind != CONST
+                && getToken(1).kind != STATIC && getToken(1).kind != TYPE) {
+            if (getToken(1).kind != ID) {
+                boolean campoPublico = coincidirToken(PUB);
+                if (campoPublico && getToken(1).kind == ID) {
+                    Token campoTok = getNextToken();
+                    if (!coincidirToken(DOS_PUNTOS) || !esInicioTipo(getToken(1).kind)) {
+                        registrarError("Se esperaba ':' y el tipo del campo publico '" + campoTok.image + "'");
+                    } else {
+                        TokenFisio tipoFisio = TipoFuente();
+                        if (tipoFisio != null) campos.add(new NodoStruct.Campo(
+                            tokenFisioDe(campoTok), tipoFisio, true));
+                    }
+                    if (getToken(1).kind == COMA) getNextToken();
+                    else if (getToken(1).kind != LLAVE_DER)
+                        registrarError("Se esperaba ',' entre campos del struct");
+                    continue;
+                }
+                registrarError("Se esperaba el nombre de un campo");
+                getNextToken();
+                continue;
+            }
+            Token campoTok = getNextToken();
+            if (!coincidirToken(DOS_PUNTOS)) {
+                registrarError("Se esperaba ':' despues del campo '" + campoTok.image + "'");
+                while (getToken(1).kind != COMA && getToken(1).kind != LLAVE_DER
+                        && getToken(1).kind != EOF) getNextToken();
+            } else if (!esInicioTipo(getToken(1).kind)) {
+                registrarError("Se esperaba el tipo del campo '" + campoTok.image + "'");
+            } else {
+                TokenFisio tipoFisio = TipoFuente();
+                if (tipoFisio != null)
+                    campos.add(new NodoStruct.Campo(tokenFisioDe(campoTok), tipoFisio));
+            }
+            if (getToken(1).kind == COMA) getNextToken();
+            else if (getToken(1).kind != LLAVE_DER) {
+                registrarError("Se esperaba ',' entre campos del struct");
+            }
+        }
+        if (!coincidirToken(LLAVE_DER)) registrarError("Se esperaba '}' para cerrar el struct");
+        TokenFisio tf = tokenFisioDe(structTok);
+        return new NodoStruct(tf.linea(), tf.columna(), publico, tokenFisioDe(nombreTok), campos);
+    }
+}
+
+/** Tipo de fuente canonico: simple, arreglo [T; N], tupla (T, U) o unidad (). */
+TokenFisio TipoFuente():
+{
+    Token inicio;
+    Token longitud;
+    TokenFisio elemento;
+    List<TokenFisio> componentes = new ArrayList<TokenFisio>();
+    boolean tuvoComa = false;
+    boolean referenciaMutable = false;
+}
+{
+    {
+        inicio = getToken(1);
+        if (inicio.kind == AMPERSAND) {
+            getNextToken();
+            if (getToken(1).kind == MUT) {
+                getNextToken();
+                referenciaMutable = true;
+            }
+            if (!esInicioTipo(getToken(1).kind)) {
+                registrarError("Se esperaba el tipo apuntado por la referencia");
+                return null;
+            }
+            elemento = TipoFuente();
+            if (elemento == null) return null;
+            return new TokenFisio(referenciaMutable ? "&mut " + elemento.lexema() : "&" + elemento.lexema(),
+                CategoriaToken.ID, "TIPO", inicio.beginLine, inicio.beginColumn);
+        }
+        if (inicio.kind == ID) return tokenFisioDe(getNextToken());
+        if (inicio.kind == CORCHETE_IZQ) {
+            getNextToken();
+            if (!esInicioTipo(getToken(1).kind)) {
+                registrarError("Se esperaba el tipo de los elementos del arreglo");
+                return null;
+            }
+            elemento = TipoFuente();
+            if (elemento == null) return null;
+            if (!coincidirToken(PUNTO_COMA)) {
+                registrarError("Se esperaba ';' entre el tipo y la longitud del arreglo");
+                return null;
+            }
+            if (getToken(1).kind != NUM || getToken(1).image.contains(".")) {
+                registrarError("La longitud del arreglo debe ser un entero no negativo");
+                return null;
+            }
+            longitud = getNextToken();
+            if (!coincidirToken(CORCHETE_DER)) {
+                registrarError("Se esperaba ']' para cerrar el tipo arreglo");
+                return null;
+            }
+            return new TokenFisio("[" + elemento.lexema() + ";" + longitud.image + "]",
+                CategoriaToken.ID, "TIPO", inicio.beginLine, inicio.beginColumn);
+        }
+        if (inicio.kind == PAREN_IZQ) {
+            getNextToken();
+            if (coincidirToken(PAREN_DER)) {
+                return new TokenFisio("()", CategoriaToken.ID, "TIPO",
+                    inicio.beginLine, inicio.beginColumn);
+            }
+            while (true) {
+                if (!esInicioTipo(getToken(1).kind)) {
+                    registrarError("Se esperaba un tipo dentro de la tupla");
+                    return null;
+                }
+                elemento = TipoFuente();
+                if (elemento == null) return null;
+                componentes.add(elemento);
+                if (getToken(1).kind != COMA) break;
+                getNextToken();
+                tuvoComa = true;
+                if (getToken(1).kind == PAREN_DER) break;
+            }
+            if (!coincidirToken(PAREN_DER)) {
+                registrarError("Se esperaba ')' para cerrar el tipo tupla");
+                return null;
+            }
+            if (componentes.size() == 1 && !tuvoComa) return componentes.get(0);
+            StringBuilder texto = new StringBuilder("(");
+            for (int i = 0; i < componentes.size(); i++) {
+                if (i > 0) texto.append(",");
+                texto.append(componentes.get(i).lexema());
+            }
+            if (componentes.size() == 1) texto.append(",");
+            texto.append(")");
+            return new TokenFisio(texto.toString(), CategoriaToken.ID, "TIPO",
+                inicio.beginLine, inicio.beginColumn);
+        }
+        registrarError("Se esperaba un tipo");
+        return null;
+    }
+}
+
+NodoAST DefinicionEnum(boolean publico):
+{
+    Token enumTok;
+    Token nombreTok;
+    List<NodoEnum.Variante> variantes = new ArrayList<NodoEnum.Variante>();
+}
+{
+    enumTok=<ENUM>
+    {
+        if (getToken(1).kind != ID) {
+            registrarError("Se esperaba el nombre del enum");
+            sincronizarFuncion();
+            return null;
+        }
+        nombreTok = getNextToken();
+        if (!coincidirToken(LLAVE_IZQ)) {
+            registrarError("Se esperaba '{' despues del nombre del enum");
+            sincronizarFuncion();
+            return null;
+        }
+        while (getToken(1).kind != LLAVE_DER && getToken(1).kind != EOF
+                && !esInicioItem(getToken(1).kind)) {
+            if (getToken(1).kind != ID) {
+                registrarError("Se esperaba el nombre de una variante");
+                getNextToken();
+                continue;
+            }
+            Token varianteTok = getNextToken();
+            List<TokenFisio> tiposVariante = new ArrayList<TokenFisio>();
+            List<NodoEnum.Campo> camposVariante = new ArrayList<NodoEnum.Campo>();
+            NodoEnum.Forma formaVariante = NodoEnum.Forma.UNITARIA;
+            if (coincidirToken(PAREN_IZQ)) {
+                formaVariante = NodoEnum.Forma.TUPLA;
+                while (getToken(1).kind != PAREN_DER && getToken(1).kind != EOF) {
+                    if (!esInicioTipo(getToken(1).kind)) {
+                        registrarError("Se esperaba el tipo de un dato de la variante");
+                        sincronizarArgumento();
+                        break;
+                    }
+                    TokenFisio tipoVariante = TipoFuente();
+                    if (tipoVariante != null) tiposVariante.add(tipoVariante);
+                    if (getToken(1).kind == COMA) {
+                        getNextToken();
+                        if (getToken(1).kind == PAREN_DER) break;
+                    } else if (getToken(1).kind != PAREN_DER) {
+                        registrarError("Se esperaba ',' entre los datos de la variante");
+                        break;
+                    }
+                }
+                if (!coincidirToken(PAREN_DER)) registrarError("Se esperaba ')' para cerrar la variante");
+            } else if (coincidirToken(LLAVE_IZQ)) {
+                formaVariante = NodoEnum.Forma.ESTRUCTURA;
+                while (getToken(1).kind != LLAVE_DER && getToken(1).kind != EOF) {
+                    if (getToken(1).kind == PUB) {
+                        registrarError("Los campos de una variante enum no admiten 'pub'");
+                        getNextToken();
+                    }
+                    if (getToken(1).kind != ID) {
+                        registrarError("Se esperaba el nombre de un campo de variante");
+                        sincronizarArgumento();
+                        break;
+                    }
+                    Token campoTok = getNextToken();
+                    if (!coincidirToken(DOS_PUNTOS)) {
+                        registrarError("Se esperaba ':' después del campo de variante");
+                        sincronizarArgumento();
+                        break;
+                    }
+                    if (!esInicioTipo(getToken(1).kind)) {
+                        registrarError("Se esperaba el tipo del campo de variante");
+                        sincronizarArgumento();
+                        break;
+                    }
+                    TokenFisio tipoCampo = TipoFuente();
+                    if (tipoCampo != null)
+                        camposVariante.add(new NodoEnum.Campo(false, tokenFisioDe(campoTok), tipoCampo));
+                    if (getToken(1).kind == COMA) {
+                        getNextToken();
+                        if (getToken(1).kind == LLAVE_DER) break;
+                    } else if (getToken(1).kind != LLAVE_DER) {
+                        registrarError("Se esperaba ',' entre campos de la variante");
+                        break;
+                    }
+                }
+                if (!coincidirToken(LLAVE_DER)) registrarError("Se esperaba '}' para cerrar la variante");
+            }
+            variantes.add(new NodoEnum.Variante(tokenFisioDe(varianteTok), tiposVariante,
+                camposVariante, formaVariante));
+            if (getToken(1).kind == COMA) getNextToken();
+            else if (getToken(1).kind != LLAVE_DER) {
+                registrarError("Se esperaba ',' entre variantes del enum");
+            }
+        }
+        if (!coincidirToken(LLAVE_DER)) registrarError("Se esperaba '}' para cerrar el enum");
+        TokenFisio tf = tokenFisioDe(enumTok);
+        return new NodoEnum(tf.linea(), tf.columna(), publico, tokenFisioDe(nombreTok), variantes);
+    }
+}
+
+NodoAST DefinicionTrait(boolean publico):
+{
+    Token traitTok;
+    Token nombreTok;
+    TokenFisio nombreFisio;
+    TokenFisio tipoSelf;
+    List<NodoFirmaTrait> metodos = new ArrayList<NodoFirmaTrait>();
+}
+{
+    traitTok=<TRAIT>
+    {
+        if (getToken(1).kind != ID) {
+            registrarError("Se esperaba el nombre del trait");
+            sincronizarFuncion();
+            return null;
+        }
+        nombreTok = getNextToken();
+        nombreFisio = tokenFisioDe(nombreTok);
+        tipoSelf = new TokenFisio("Self", CategoriaToken.ID, "TIPO", nombreTok.beginLine, nombreTok.beginColumn);
+        if (!coincidirToken(LLAVE_IZQ)) {
+            registrarError("Se esperaba '{' para iniciar el trait");
+            sincronizarFuncion();
+            return null;
+        }
+        while (getToken(1).kind != LLAVE_DER && getToken(1).kind != EOF) {
+            if (getToken(1).kind == PUB) {
+                registrarError("Los métodos de un trait no se declaran con 'pub'");
+                getNextToken();
+            }
+            if (getToken(1).kind != FN) {
+                registrarError("Un trait solo puede contener firmas de métodos");
+                getNextToken();
+                continue;
+            }
+            NodoAST firma = FirmaTrait(tipoSelf);
+            if (firma instanceof NodoFirmaTrait) metodos.add((NodoFirmaTrait) firma);
+        }
+        if (!coincidirToken(LLAVE_DER)) registrarError("Se esperaba '}' para cerrar el trait");
+        TokenFisio tf = tokenFisioDe(traitTok);
+        return new NodoTrait(tf.linea(), tf.columna(), publico, nombreFisio, metodos);
+    }
+}
+
+NodoAST FirmaTrait(TokenFisio tipoSelf):
 {
     Token nombre;
-    Token tipoRetornoTok = null;
+    TokenFisio tipoRetornoFisio = null;
+    List<NodoParametroFuncion> parametros = new ArrayList<NodoParametroFuncion>();
+    NodoParametroFuncion parametro;
+}
+{
+    <FN>
+    {
+        if (getToken(1).kind != ID) {
+            registrarError("Se esperaba el nombre del método del trait");
+            return null;
+        }
+    }
+    nombre=<ID>
+    {
+        if (!coincidirToken(PAREN_IZQ)) {
+            registrarError("Se esperaba '(' después del método del trait");
+            return null;
+        }
+    }
+    (
+        parametro=Parametro(tipoSelf)
+        { if (parametro == null) return null; parametros.add(parametro); }
+        (
+            <COMA>
+            {
+                if (getToken(1).kind != ID && getToken(1).kind != AMPERSAND) {
+                    registrarError("Se esperaba un parámetro después de ','");
+                    return null;
+                }
+            }
+            parametro=Parametro(tipoSelf)
+            { if (parametro == null) return null; parametros.add(parametro); }
+        )*
+    )?
+    {
+        if (!coincidirToken(PAREN_DER)) {
+            registrarError("Se esperaba ')' para cerrar los parámetros del trait");
+            return null;
+        }
+    }
+    (
+        <FLECHA>
+        {
+            if (!esInicioTipo(getToken(1).kind)) {
+                registrarError("Se esperaba el tipo de retorno del método del trait");
+                return null;
+            }
+            tipoRetornoFisio = TipoFuente();
+            if (tipoRetornoFisio == null) return null;
+        }
+    )?
+    {
+        if (!coincidirToken(PUNTO_COMA)) {
+            registrarError("La firma de un método de trait debe terminar con ';'");
+            return null;
+        }
+        TokenFisio tf = tokenFisioDe(nombre);
+        return new NodoFirmaTrait(tf.linea(), tf.columna(), tf, parametros, tipoRetornoFisio);
+    }
+}
+
+NodoAST DefinicionImpl():
+{
+    Token implTok;
+    Token primeroTok;
+    Token tipoTok;
+    TokenFisio rasgoFisio = null;
+    TokenFisio tipoFisio;
+    List<NodoFuncion> metodos = new ArrayList<NodoFuncion>();
+}
+{
+    implTok=<IMPL>
+    {
+        if (getToken(1).kind != ID) {
+            registrarError("Se esperaba el tipo después de 'impl'");
+            sincronizarFuncion();
+            return null;
+        }
+        primeroTok = getNextToken();
+        tipoTok = primeroTok;
+        if (coincidirToken(FOR)) {
+            rasgoFisio = tokenFisioDe(primeroTok);
+            if (getToken(1).kind != ID) {
+                registrarError("Se esperaba el tipo después de 'for'");
+                sincronizarFuncion();
+                return null;
+            }
+            tipoTok = getNextToken();
+        }
+        tipoFisio = tokenFisioDe(tipoTok);
+        if (!coincidirToken(LLAVE_IZQ)) {
+            registrarError("Se esperaba '{' para iniciar el bloque impl");
+            sincronizarFuncion();
+            return null;
+        }
+        while (getToken(1).kind != LLAVE_DER && getToken(1).kind != EOF) {
+            boolean publicoMetodo = coincidirToken(PUB);
+            if (getToken(1).kind != FN) {
+                registrarError("Un bloque impl solo puede contener funciones");
+                getNextToken();
+                continue;
+            }
+            NodoAST metodo = Funcion(publicoMetodo, tipoFisio);
+            if (metodo instanceof NodoFuncion) metodos.add((NodoFuncion) metodo);
+        }
+        if (!coincidirToken(LLAVE_DER)) registrarError("Se esperaba '}' para cerrar el bloque impl");
+        TokenFisio tf = tokenFisioDe(implTok);
+        return new NodoImpl(tf.linea(), tf.columna(), rasgoFisio, tipoFisio, metodos);
+    }
+}
+
+NodoAST Funcion(boolean publico, TokenFisio tipoImpl):
+{
+    Token nombre;
+    TokenFisio tipoRetornoFisio = null;
     List<NodoParametroFuncion> parametros = new ArrayList<NodoParametroFuncion>();
     NodoParametroFuncion parametro;
     NodoBloque cuerpo;
@@ -355,7 +1173,7 @@ NodoAST Funcion():
     }
     (
         LOOKAHEAD(1)
-        parametro = Parametro()
+        parametro = Parametro(tipoImpl)
         {
             if (parametro == null) {
                 sincronizarFuncion();
@@ -367,13 +1185,14 @@ NodoAST Funcion():
             LOOKAHEAD(1)
             <COMA>
             {
-                if (getToken(1).kind != FisioParserConstants.ID) {
+                if (getToken(1).kind != FisioParserConstants.ID
+                        && getToken(1).kind != FisioParserConstants.AMPERSAND) {
                     registrarError("Se esperaba un parametro despues de ','");
                     sincronizarFuncion();
                     return null;
                 }
             }
-            parametro = Parametro()
+            parametro = Parametro(tipoImpl)
             {
                 if (parametro == null) {
                     sincronizarFuncion();
@@ -394,63 +1213,118 @@ NodoAST Funcion():
         LOOKAHEAD(1)
         <FLECHA>
         {
-            if (getToken(1).kind != FisioParserConstants.ID) {
+            if (!esInicioTipo(getToken(1).kind)) {
                 registrarError("Se esperaba tipo de retorno despues de '->'");
                 sincronizarFuncion();
                 return null;
             }
+            tipoRetornoFisio = TipoFuente();
+            if (tipoRetornoFisio == null) {
+                sincronizarFuncion();
+                return null;
+            }
         }
-        tipoRetornoTok=<ID>
     )?
     cuerpo = Bloque()
     {
         TokenFisio nombreFisio = tokenFisioDe(nombre);
-        TokenFisio tipoRetornoFisio = (tipoRetornoTok != null) ? tokenFisioDe(tipoRetornoTok) : null;
         return new NodoFuncion(
-            nombreFisio.linea(), nombreFisio.columna(), nombreFisio, parametros, tipoRetornoFisio, cuerpo);
+            nombreFisio.linea(), nombreFisio.columna(), publico,
+            nombreFisio, parametros, tipoRetornoFisio, cuerpo);
     }
 }
 
-NodoParametroFuncion Parametro():
+NodoParametroFuncion Parametro(TokenFisio tipoImpl):
 {
     Token idTok;
-    Token tipoTok;
+    Token inicio;
+    TokenFisio tipoFisio;
+    boolean receptorMutable = false;
 }
 {
-    idTok=<ID>
+    (
+        inicio=<AMPERSAND>
+        [ <MUT> { receptorMutable = true; } ]
+        {
+            if (tipoImpl == null || getToken(1).kind != ID || !getToken(1).image.equals("self")) {
+                registrarError("Solo los métodos de impl admiten receptores '&self' o '&mut self'");
+                return null;
+            }
+            idTok = getNextToken();
+            TokenFisio idFisio = tokenFisioDe(idTok);
+            tipoFisio = new TokenFisio(receptorMutable ? "&mut " + tipoImpl.lexema() : "&" + tipoImpl.lexema(),
+                CategoriaToken.ID, "TIPO", inicio.beginLine, inicio.beginColumn);
+            return new NodoParametroFuncion(idFisio.linea(), idFisio.columna(), idFisio, tipoFisio);
+        }
+      |
+        idTok=<ID>
+        {
+            if (tipoImpl != null && idTok.image.equals("self") && getToken(1).kind != DOS_PUNTOS) {
+                TokenFisio idFisio = tokenFisioDe(idTok);
+                return new NodoParametroFuncion(idFisio.linea(), idFisio.columna(), idFisio, tipoImpl);
+            }
+        }
+    )
     {
         if (!coincidirToken(FisioParserConstants.DOS_PUNTOS)) {
             registrarError("Se esperaba ':' despues del nombre del parametro");
             return null;
         }
-        if (getToken(1).kind != FisioParserConstants.ID) {
+        if (!esInicioTipo(getToken(1).kind)) {
             registrarError("Se esperaba un tipo despues de ':' en el parametro");
             return null;
         }
+        tipoFisio = TipoFuente();
+        if (tipoFisio == null) return null;
     }
-    tipoTok=<ID>
     {
         TokenFisio idFisio = tokenFisioDe(idTok);
-        TokenFisio tipoFisio = tokenFisioDe(tipoTok);
         return new NodoParametroFuncion(idFisio.linea(), idFisio.columna(), idFisio, tipoFisio);
     }
 }
 
 NodoBloque Bloque():
 {
+    Token apertura;
+    NodoBloque resultado;
+}
+{
+    {
+        apertura = getToken(1);
+        if (!coincidirToken(LLAVE_IZQ)) {
+            registrarError("Se esperaba '{' para iniciar el bloque");
+            return new NodoBloque(apertura.beginLine, apertura.beginColumn, new ArrayList<NodoAST>(), null);
+        }
+    }
+    resultado = ContenidoBloque(apertura)
+    { return resultado; }
+}
+
+/** Variante no vacia usada cuando un bloque participa como expresion. */
+NodoBloque BloqueExpresion():
+{
+    Token apertura;
+    NodoBloque resultado;
+}
+{
+    apertura=<LLAVE_IZQ>
+    resultado = ContenidoBloque(apertura)
+    { return resultado; }
+}
+
+NodoBloque ContenidoBloque(Token apertura):
+{
     List<NodoAST> sentencias = new ArrayList<NodoAST>();
     NodoAST expresionFinal = null;
 }
 {
     {
-        Token apertura = getToken(1);
-        if (!coincidirToken(LLAVE_IZQ)) {
-            registrarError("Se esperaba '{' para iniciar el bloque");
-            return new NodoBloque(apertura.beginLine, apertura.beginColumn, sentencias, null);
-        }
-        while (getToken(1).kind != LLAVE_DER && getToken(1).kind != EOF && getToken(1).kind != FN) {
+        while (getToken(1).kind != LLAVE_DER && getToken(1).kind != EOF
+                && !esItemSoloSuperior(getToken(1).kind)) {
             Token inicio = getToken(1);
-            if (esInicioExpresion(inicio.kind) && !esAsignacion()) {
+            if (esInicioExpresion(inicio.kind) && inicio.kind != IF && inicio.kind != MATCH
+                    && inicio.kind != LLAVE_IZQ
+                    && !esAsignacion()) {
                 NodoAST expresion = Expresion();
                 if (expresion == null) sincronizar();
                 else if (coincidirToken(PUNTO_COMA)) sentencias.add(expresion);
@@ -481,22 +1355,32 @@ NodoAST Sentencia():
 {
     {
         k = getToken(1).kind;
-        if (!(k == FisioParserConstants.LET || k == FisioParserConstants.IF
+        if (!(k == FisioParserConstants.LET || k == FisioParserConstants.CONST || k == FisioParserConstants.STATIC
+                || k == FisioParserConstants.IF || k == FisioParserConstants.MATCH
                 || k == FisioParserConstants.WHILE || k == FisioParserConstants.FOR
                 || k == FisioParserConstants.LOOP || k == FisioParserConstants.RETURN
-                || k == FisioParserConstants.ID)) {
+                || k == FisioParserConstants.BREAK || k == FisioParserConstants.CONTINUE
+                || k == FisioParserConstants.LLAVE_IZQ || k == FisioParserConstants.ID
+                || k == FisioParserConstants.MULT || k == FisioParserConstants.AMPERSAND)) {
             registrarError("Se esperaba una declaracion o sentencia");
             sincronizar();
             return null;
         }
     }
     (
-        resultado = Declaracion()
-      | resultado = SentenciaIf()
+        LOOKAHEAD(<LET> <ID> <DOBLE_DOS_PUNTOS>) resultado = DeclaracionLetElse()
+      | resultado = Declaracion()
+      | LOOKAHEAD(<CONST>) resultado = Constante(false)
+      | LOOKAHEAD(<STATIC>) resultado = Estatico(false)
+      | LOOKAHEAD(<IF>) resultado = SentenciaIf()
+      | LOOKAHEAD(<MATCH>) resultado = ExpresionMatch()
       | resultado = SentenciaWhile()
       | resultado = SentenciaFor()
       | resultado = SentenciaLoop()
       | resultado = SentenciaReturn()
+      | resultado = SentenciaBreak()
+      | resultado = SentenciaContinue()
+      | LOOKAHEAD(<LLAVE_IZQ>) resultado = BloqueExpresion()
       | LOOKAHEAD({ esAsignacion() }) resultado = Asignacion()
       | resultado = SentenciaExpresion()
     )
@@ -524,10 +1408,53 @@ NodoAST SentenciaExpresion():
     }
 }
 
+NodoAST DeclaracionLetElse():
+{
+    Token letTok;
+    PatronVariante patron;
+    NodoAST expresion;
+    NodoBloque cuerpoElse;
+}
+{
+    letTok=<LET>
+    {
+        patron = leerPatronVariante();
+        if (patron == null) {
+            sincronizar();
+            return null;
+        }
+        if (!coincidirToken(FisioParserConstants.ASIGNACION)) {
+            registrarError("Se esperaba '=' después del patrón de let else");
+            sincronizar();
+            return null;
+        }
+    }
+    expresion = Expresion()
+    {
+        if (expresion == null) {
+            sincronizar();
+            return null;
+        }
+        if (!coincidirToken(FisioParserConstants.ELSE)) {
+            registrarError("Se esperaba 'else' después del valor de let else");
+            sincronizar();
+            return null;
+        }
+    }
+    cuerpoElse = Bloque()
+    {
+        if (!coincidirToken(FisioParserConstants.PUNTO_COMA)) {
+            registrarError("Se esperaba ';' al final de let else");
+            sincronizar();
+        }
+        return new NodoLetElse(letTok.beginLine, letTok.beginColumn, patron, expresion, cuerpoElse);
+    }
+}
+
 NodoAST Declaracion():
 {
     Token idTok;
-    Token tipoTok = null;
+    TokenFisio tipoFisio = null;
     boolean mutable = false;
     NodoAST expresion;
 }
@@ -548,13 +1475,17 @@ NodoAST Declaracion():
         LOOKAHEAD(1)
         <DOS_PUNTOS>
         {
-            if (getToken(1).kind != FisioParserConstants.ID) {
+            if (!esInicioTipo(getToken(1).kind)) {
                 registrarError("Se esperaba un tipo despues de ':'");
                 sincronizar();
                 return null;
             }
+            tipoFisio = TipoFuente();
+            if (tipoFisio == null) {
+                sincronizar();
+                return null;
+            }
         }
-        tipoTok=<ID>
     )?
     {
         if (!coincidirToken(FisioParserConstants.ASIGNACION)) {
@@ -574,24 +1505,25 @@ NodoAST Declaracion():
             sincronizar();
         }
         TokenFisio idFisio = tokenFisioDe(idTok);
-        TokenFisio tipoFisio = (tipoTok != null) ? tokenFisioDe(tipoTok) : null;
         return new NodoDeclaracion(idFisio.linea(), idFisio.columna(), idFisio, mutable, tipoFisio, expresion);
     }
 }
 
 NodoAST Asignacion():
 {
-    Token idTok;
     Token operadorTok;
     NodoAST expresion;
+    NodoAST lugar;
 }
 {
-    idTok=<ID>
+    lugar = LugarAsignable()
     {
+        if (lugar == null) {
+            sincronizar();
+            return null;
+        }
         int k = getToken(1).kind;
-        if (!(k == FisioParserConstants.ASIGNACION || k == FisioParserConstants.MAS_IGUAL
-                || k == FisioParserConstants.MENOS_IGUAL || k == FisioParserConstants.MULT_IGUAL
-                || k == FisioParserConstants.DIV_IGUAL || k == FisioParserConstants.MOD_IGUAL)) {
+        if (!esOperadorAsignacion(k)) {
             registrarError("Se esperaba '=' en la asignacion");
             sincronizar();
             return null;
@@ -604,6 +1536,11 @@ NodoAST Asignacion():
       | operadorTok=<MULT_IGUAL>
       | operadorTok=<DIV_IGUAL>
       | operadorTok=<MOD_IGUAL>
+      | operadorTok=<SHIFT_IZQ_IGUAL>
+      | operadorTok=<SHIFT_DER_IGUAL>
+      | operadorTok=<AND_BIT_IGUAL>
+      | operadorTok=<OR_BIT_IGUAL>
+      | operadorTok=<XOR_BIT_IGUAL>
     )
     expresion = Expresion()
     {
@@ -615,10 +1552,77 @@ NodoAST Asignacion():
             registrarError("Se esperaba ';' al final de la sentencia");
             sincronizar();
         }
-        TokenFisio idFisio = tokenFisioDe(idTok);
         TokenFisio operadorFisio = tokenFisioDe(operadorTok);
-        NodoAST lugar = new NodoIdentificador(idFisio.linea(), idFisio.columna(), idFisio);
-        return new NodoAsignacion(idFisio.linea(), idFisio.columna(), lugar, operadorFisio, expresion);
+        return new NodoAsignacion(lugar.linea(), lugar.columna(), lugar, operadorFisio, expresion);
+    }
+}
+
+NodoAST LugarAsignable():
+{
+    Token idTok;
+    Token punto;
+    Token miembro;
+    Token apertura;
+    NodoAST indice;
+    NodoAST lugar;
+    Token primeraEstrella = null;
+    Token estrella;
+    int desreferencias = 0;
+}
+{
+    (
+        estrella=<MULT>
+        {
+            if (primeraEstrella == null) primeraEstrella = estrella;
+            desreferencias++;
+        }
+    )*
+    idTok=<ID>
+    {
+        TokenFisio idFisio = tokenFisioDe(idTok);
+        lugar = new NodoIdentificador(idFisio.linea(), idFisio.columna(), idFisio);
+    }
+    (
+        LOOKAHEAD(1)
+        (
+            punto=<PUNTO>
+            {
+                if (getToken(1).kind != ID && getToken(1).kind != NUM) {
+                    registrarError("Se esperaba un campo o indice de tupla despues de '.'");
+                    return null;
+                }
+                miembro = getNextToken();
+                TokenFisio puntoFisio = tokenFisioDe(punto);
+                if (miembro.kind == ID) {
+                    lugar = new NodoAccesoCampo(puntoFisio.linea(), puntoFisio.columna(), lugar,
+                        tokenFisioDe(miembro));
+                } else {
+                    if (miembro.image.contains(".")) {
+                        registrarError("El indice de una tupla debe ser un entero no negativo");
+                        return null;
+                    }
+                    lugar = new NodoAccesoTupla(puntoFisio.linea(), puntoFisio.columna(), lugar,
+                        tokenFisioDe(miembro));
+                }
+            }
+          |
+            apertura=<CORCHETE_IZQ>
+            indice=Expresion()
+            {
+                if (indice == null) return null;
+                if (!coincidirToken(CORCHETE_DER)) {
+                    registrarError("Se esperaba ']' para cerrar el indice");
+                    return null;
+                }
+                lugar = new NodoIndice(apertura.beginLine, apertura.beginColumn, lugar, indice);
+            }
+        )
+    )*
+    {
+        for (int i = 0; i < desreferencias; i++) {
+            lugar = new NodoDesreferencia(primeraEstrella.beginLine, primeraEstrella.beginColumn, lugar);
+        }
+        return lugar;
     }
 }
 
@@ -628,11 +1632,39 @@ NodoAST SentenciaIf():
     NodoAST condicion;
     NodoBloque cuerpo;
     NodoAST otro = null;
+    NodoAST guarda = null;
+    PatronVariante patron = null;
 }
 {
     ifTok=<IF>
-    condicion = Expresion()
     {
+        if (getToken(1).kind == LET) {
+            getNextToken();
+            patron = leerPatronVariante();
+            if (patron == null) {
+                sincronizarCabeceraControl();
+                return null;
+            }
+            if (!coincidirToken(ASIGNACION)) {
+                registrarError("Se esperaba '=' después del patrón de if let");
+                sincronizarCabeceraControl();
+                return null;
+            }
+        }
+        profundidadCabeceraControl++;
+    }
+    {
+        condicion = patron == null ? Expresion() : ExpIgualdad();
+        if (patron != null && coincidirToken(AND)) {
+            if (!esInicioExpresion(getToken(1).kind)) {
+                registrarError("Se esperaba una condición después de '&&' en if let");
+                profundidadCabeceraControl--;
+                sincronizarCabeceraControl();
+                return null;
+            }
+            guarda = Expresion();
+        }
+        profundidadCabeceraControl--;
         if (condicion == null) {
             sincronizarCabeceraControl();
             if (getToken(1).kind != LLAVE_IZQ) {
@@ -663,7 +1695,9 @@ NodoAST SentenciaIf():
     {
         if (condicion == null) return null;
         TokenFisio ifFisio = tokenFisioDe(ifTok);
-        return new NodoIf(ifFisio.linea(), ifFisio.columna(), condicion, cuerpo, otro);
+        return patron == null
+            ? new NodoIf(ifFisio.linea(), ifFisio.columna(), condicion, cuerpo, otro)
+            : new NodoIfLet(ifFisio.linea(), ifFisio.columna(), patron, condicion, guarda, cuerpo, otro);
     }
 }
 
@@ -672,11 +1706,39 @@ NodoAST SentenciaWhile():
     Token whileTok;
     NodoAST condicion;
     NodoBloque cuerpo;
+    NodoAST guarda = null;
+    PatronVariante patron = null;
 }
 {
     whileTok=<WHILE>
-    condicion = Expresion()
     {
+        if (getToken(1).kind == LET) {
+            getNextToken();
+            patron = leerPatronVariante();
+            if (patron == null) {
+                sincronizarCabeceraControl();
+                return null;
+            }
+            if (!coincidirToken(ASIGNACION)) {
+                registrarError("Se esperaba '=' después del patrón de while let");
+                sincronizarCabeceraControl();
+                return null;
+            }
+        }
+        profundidadCabeceraControl++;
+    }
+    {
+        condicion = patron == null ? Expresion() : ExpIgualdad();
+        if (patron != null && coincidirToken(AND)) {
+            if (!esInicioExpresion(getToken(1).kind)) {
+                registrarError("Se esperaba una condición después de '&&' en while let");
+                profundidadCabeceraControl--;
+                sincronizarCabeceraControl();
+                return null;
+            }
+            guarda = Expresion();
+        }
+        profundidadCabeceraControl--;
         if (condicion == null) {
             sincronizarCabeceraControl();
             if (getToken(1).kind != LLAVE_IZQ) {
@@ -689,7 +1751,9 @@ NodoAST SentenciaWhile():
     {
         if (condicion == null) return null;
         TokenFisio whileFisio = tokenFisioDe(whileTok);
-        return new NodoWhile(whileFisio.linea(), whileFisio.columna(), condicion, cuerpo);
+        return patron == null
+            ? new NodoWhile(whileFisio.linea(), whileFisio.columna(), condicion, cuerpo)
+            : new NodoWhileLet(whileFisio.linea(), whileFisio.columna(), patron, condicion, guarda, cuerpo);
     }
 }
 
@@ -717,8 +1781,10 @@ NodoAST SentenciaFor():
             return null;
         }
     }
+    { profundidadCabeceraControl++; }
     iterable = Expresion()
     {
+        profundidadCabeceraControl--;
         if (iterable == null) {
             sincronizarCabeceraControl();
             if (getToken(1).kind != LLAVE_IZQ) {
@@ -767,6 +1833,38 @@ NodoAST SentenciaReturn():
         }
         TokenFisio returnFisio = tokenFisioDe(returnTok);
         return new NodoReturn(returnFisio.linea(), returnFisio.columna(), expresion);
+    }
+}
+
+NodoAST SentenciaBreak():
+{
+    Token breakTok;
+}
+{
+    breakTok=<BREAK>
+    {
+        if (!coincidirToken(FisioParserConstants.PUNTO_COMA)) {
+            registrarError("Se esperaba ';' al final de 'break'");
+            sincronizar();
+        }
+        TokenFisio tf = tokenFisioDe(breakTok);
+        return new NodoBreak(tf.linea(), tf.columna());
+    }
+}
+
+NodoAST SentenciaContinue():
+{
+    Token continueTok;
+}
+{
+    continueTok=<CONTINUE>
+    {
+        if (!coincidirToken(FisioParserConstants.PUNTO_COMA)) {
+            registrarError("Se esperaba ';' al final de 'continue'");
+            sincronizar();
+        }
+        TokenFisio tf = tokenFisioDe(continueTok);
+        return new NodoContinue(tf.linea(), tf.columna());
     }
 }
 
@@ -902,7 +2000,7 @@ NodoAST ExpRelacional():
     Token operador;
 }
 {
-    izquierda = ExpAditiva()
+    izquierda = ExpBitOr()
     {
         if (izquierda == null) {
             return null;
@@ -911,7 +2009,7 @@ NodoAST ExpRelacional():
     (
         LOOKAHEAD(1)
         ( operador=<MENOR_QUE> | operador=<MAYOR_QUE> | operador=<MENOR_IGUAL> | operador=<MAYOR_IGUAL> )
-        derecha = ExpAditiva()
+        derecha = ExpBitOr()
         {
             if (derecha == null) {
                 return null;
@@ -919,6 +2017,86 @@ NodoAST ExpRelacional():
             TokenFisio opFisio = tokenFisioDe(operador);
             izquierda = new NodoOperacionRelacional(
                 opFisio.linea(), opFisio.columna(), opFisio, izquierda, derecha);
+        }
+    )*
+    { return izquierda; }
+}
+
+NodoAST ExpBitOr():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token operador;
+}
+{
+    izquierda = ExpBitXor()
+    (
+        LOOKAHEAD(1)
+        operador=<PIPE>
+        derecha = ExpBitXor()
+        {
+            TokenFisio opFisio = tokenFisioDe(operador);
+            izquierda = new NodoOperacion(opFisio.linea(), opFisio.columna(), opFisio, izquierda, derecha);
+        }
+    )*
+    { return izquierda; }
+}
+
+NodoAST ExpBitXor():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token operador;
+}
+{
+    izquierda = ExpBitAnd()
+    (
+        LOOKAHEAD(1)
+        operador=<CARET>
+        derecha = ExpBitAnd()
+        {
+            TokenFisio opFisio = tokenFisioDe(operador);
+            izquierda = new NodoOperacion(opFisio.linea(), opFisio.columna(), opFisio, izquierda, derecha);
+        }
+    )*
+    { return izquierda; }
+}
+
+NodoAST ExpBitAnd():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token operador;
+}
+{
+    izquierda = ExpShift()
+    (
+        LOOKAHEAD(1)
+        operador=<AMPERSAND>
+        derecha = ExpShift()
+        {
+            TokenFisio opFisio = tokenFisioDe(operador);
+            izquierda = new NodoOperacion(opFisio.linea(), opFisio.columna(), opFisio, izquierda, derecha);
+        }
+    )*
+    { return izquierda; }
+}
+
+NodoAST ExpShift():
+{
+    NodoAST izquierda;
+    NodoAST derecha;
+    Token operador;
+}
+{
+    izquierda = ExpAditiva()
+    (
+        LOOKAHEAD(1)
+        ( operador=<SHIFT_IZQ> | operador=<SHIFT_DER> )
+        derecha = ExpAditiva()
+        {
+            TokenFisio opFisio = tokenFisioDe(operador);
+            izquierda = new NodoOperacion(opFisio.linea(), opFisio.columna(), opFisio, izquierda, derecha);
         }
     )*
     { return izquierda; }
@@ -959,7 +2137,7 @@ NodoAST ExpMultiplicativa():
     Token operador;
 }
 {
-    izquierda = ExpUnaria()
+    izquierda = ExpConversion()
     {
         if (izquierda == null) {
             return null;
@@ -968,7 +2146,7 @@ NodoAST ExpMultiplicativa():
     (
         LOOKAHEAD(1)
         ( operador=<MULT> | operador=<DIV> | operador=<MOD> )
-        derecha = ExpUnaria()
+        derecha = ExpConversion()
         {
             if (derecha == null) {
                 return null;
@@ -980,25 +2158,73 @@ NodoAST ExpMultiplicativa():
     { return izquierda; }
 }
 
+NodoAST ExpConversion():
+{
+    NodoAST expresion;
+    Token asTok;
+    Token tipoTok;
+}
+{
+    expresion = ExpUnaria()
+    (
+        LOOKAHEAD(1)
+        asTok=<AS>
+        {
+            if (getToken(1).kind != FisioParserConstants.ID) {
+                registrarError("Se esperaba un tipo despues de 'as'");
+                return null;
+            }
+        }
+        tipoTok=<ID>
+        {
+            TokenFisio asFisio = tokenFisioDe(asTok);
+            expresion = new NodoConversion(asFisio.linea(), asFisio.columna(), expresion, tokenFisioDe(tipoTok));
+        }
+    )*
+    { return expresion; }
+}
+
 NodoAST ExpUnaria():
 {
     Token operador;
     NodoAST operando;
     NodoAST resultado;
     int k;
+    boolean referenciaMutable = false;
 }
 {
     {
         k = getToken(1).kind;
         if (!(k == FisioParserConstants.MENOS || k == FisioParserConstants.NEGACION
+                || k == FisioParserConstants.AMPERSAND || k == FisioParserConstants.MULT
                 || k == FisioParserConstants.NUM || k == FisioParserConstants.STRING
+                || k == FisioParserConstants.CHAR || k == FisioParserConstants.IF || k == FisioParserConstants.MATCH
+                || k == FisioParserConstants.LLAVE_IZQ
                 || k == FisioParserConstants.TRUE || k == FisioParserConstants.FALSE
-                || k == FisioParserConstants.ID || k == FisioParserConstants.PAREN_IZQ)) {
+                || k == FisioParserConstants.ID || k == FisioParserConstants.PAREN_IZQ
+                || k == FisioParserConstants.CORCHETE_IZQ)) {
             registrarError("Se esperaba una expresion");
             return null;
         }
     }
     (
+        operador=<AMPERSAND>
+        [ <MUT> { referenciaMutable = true; } ]
+        operando = ExpUnaria()
+        {
+            if (operando == null) return null;
+            TokenFisio opFisio = tokenFisioDe(operador);
+            return new NodoReferencia(opFisio.linea(), opFisio.columna(), referenciaMutable, operando);
+        }
+      |
+        operador=<MULT>
+        operando = ExpUnaria()
+        {
+            if (operando == null) return null;
+            TokenFisio opFisio = tokenFisioDe(operador);
+            return new NodoDesreferencia(opFisio.linea(), opFisio.columna(), operando);
+        }
+      |
         ( operador=<MENOS> | operador=<NEGACION> )
         operando = ExpUnaria()
         {
@@ -1009,14 +2235,87 @@ NodoAST ExpUnaria():
             return new NodoOperacionUnaria(opFisio.linea(), opFisio.columna(), opFisio, operando);
         }
       |
-        resultado = Primario()
+        resultado = Postfijo()
         { return resultado; }
     )
+}
+
+NodoAST Postfijo():
+{
+    NodoAST resultado;
+    Token punto;
+    Token miembro;
+    Token apertura;
+    NodoAST indice;
+    List<NodoAST> argumentos;
+}
+{
+    resultado = Primario()
+    (
+        LOOKAHEAD(1)
+        (
+            punto=<PUNTO>
+            {
+                if (getToken(1).kind != ID && getToken(1).kind != NUM) {
+                    registrarError("Se esperaba un campo, método o indice de tupla despues de '.'");
+                    return null;
+                }
+            }
+            (
+                miembro=<ID>
+                (
+                    LOOKAHEAD(<PAREN_IZQ>)
+                    <PAREN_IZQ>
+                    { argumentos = new ArrayList<NodoAST>(); }
+                    Argumentos(argumentos)
+                    {
+                        if (!coincidirToken(PAREN_DER)) {
+                            registrarError("Se esperaba ')' al final de la llamada al método");
+                            return null;
+                        }
+                        TokenFisio tf = tokenFisioDe(punto);
+                        resultado = new NodoLlamadaMetodo(tf.linea(), tf.columna(), resultado,
+                            tokenFisioDe(miembro), argumentos);
+                    }
+                  |
+                    {
+                        TokenFisio tf = tokenFisioDe(punto);
+                        resultado = new NodoAccesoCampo(tf.linea(), tf.columna(), resultado,
+                            tokenFisioDe(miembro));
+                    }
+                )
+              |
+                miembro=<NUM>
+                {
+                    if (miembro.image.contains(".")) {
+                        registrarError("El indice de una tupla debe ser un entero no negativo");
+                        return null;
+                    }
+                    TokenFisio tf = tokenFisioDe(punto);
+                    resultado = new NodoAccesoTupla(tf.linea(), tf.columna(), resultado,
+                        tokenFisioDe(miembro));
+                }
+            )
+          |
+            apertura=<CORCHETE_IZQ>
+            indice=Expresion()
+            {
+                if (indice == null) return null;
+                if (!coincidirToken(CORCHETE_DER)) {
+                    registrarError("Se esperaba ']' para cerrar el indice");
+                    return null;
+                }
+                resultado = new NodoIndice(apertura.beginLine, apertura.beginColumn, resultado, indice);
+            }
+        )
+    )*
+    { return resultado; }
 }
 
 NodoAST Primario():
 {
     Token t;
+    Token varianteTok;
     NodoAST resultado;
     List<NodoAST> argumentos;
 }
@@ -1024,8 +2323,11 @@ NodoAST Primario():
     {
         int k = getToken(1).kind;
         if (!(k == FisioParserConstants.NUM || k == FisioParserConstants.STRING
+                || k == FisioParserConstants.CHAR || k == FisioParserConstants.IF || k == FisioParserConstants.MATCH
+                || k == FisioParserConstants.LLAVE_IZQ
                 || k == FisioParserConstants.TRUE || k == FisioParserConstants.FALSE
-                || k == FisioParserConstants.ID || k == FisioParserConstants.PAREN_IZQ)) {
+                || k == FisioParserConstants.ID || k == FisioParserConstants.PAREN_IZQ
+                || k == FisioParserConstants.CORCHETE_IZQ)) {
             registrarError("Se esperaba una expresion");
             return null;
         }
@@ -1038,6 +2340,12 @@ NodoAST Primario():
         }
       |
         t=<STRING>
+        {
+            TokenFisio tf = tokenFisioDe(t);
+            return new NodoNumero(tf.linea(), tf.columna(), tf);
+        }
+      |
+        t=<CHAR>
         {
             TokenFisio tf = tokenFisioDe(t);
             return new NodoNumero(tf.linea(), tf.columna(), tf);
@@ -1057,6 +2365,44 @@ NodoAST Primario():
       |
         t=<ID>
         (
+            LOOKAHEAD({ sigueLiteralStruct(t) })
+            resultado = LiteralStruct(t)
+            { return resultado; }
+          |
+            LOOKAHEAD(1)
+            <DOBLE_DOS_PUNTOS>
+            {
+                if (getToken(1).kind != ID) {
+                    registrarError("Se esperaba una variante despues de '::'");
+                    return null;
+                }
+            }
+            { varianteTok = getNextToken(); }
+            (
+                LOOKAHEAD({ sigueLiteralVarianteNombrada() })
+                resultado = LiteralVarianteNombrada(t, varianteTok)
+                { return resultado; }
+              |
+                LOOKAHEAD(<PAREN_IZQ>)
+                <PAREN_IZQ>
+                { argumentos = new ArrayList<NodoAST>(); }
+                Argumentos(argumentos)
+                {
+                    if (!coincidirToken(PAREN_DER)) {
+                        registrarError("Se esperaba ')' al final de la llamada asociada");
+                        return null;
+                    }
+                    TokenFisio tf = tokenFisioDe(t);
+                    return new NodoLlamadaAsociada(tf.linea(), tf.columna(), tf,
+                        tokenFisioDe(varianteTok), argumentos);
+                }
+              |
+                {
+                    TokenFisio tf = tokenFisioDe(t);
+                    return new NodoVarianteEnum(tf.linea(), tf.columna(), tf, tokenFisioDe(varianteTok));
+                }
+            )
+          |
             LOOKAHEAD(1)
             <NEGACION>
             {
@@ -1095,20 +2441,243 @@ NodoAST Primario():
             }
         )
       |
-        t=<PAREN_IZQ>
-        resultado = Expresion()
-        {
-            if (resultado == null) {
-                return null;
-            }
-            if (!coincidirToken(FisioParserConstants.PAREN_DER)) {
+        resultado = LiteralTuplaOAgrupacion()
+        { return resultado; }
+      |
+        resultado = LiteralArreglo()
+        { return resultado; }
+      |
+        resultado = SentenciaIf()
+        { return resultado; }
+      |
+        resultado = ExpresionMatch()
+        { return resultado; }
+      |
+        resultado = BloqueExpresion()
+        { return resultado; }
+    )
+}
+
+NodoAST LiteralTuplaOAgrupacion():
+{
+    Token apertura;
+    NodoAST elemento;
+    List<NodoAST> elementos = new ArrayList<NodoAST>();
+}
+{
+    apertura=<PAREN_IZQ>
+    {
+        if (coincidirToken(PAREN_DER))
+            return new NodoTupla(apertura.beginLine, apertura.beginColumn, elementos);
+        if (!esInicioExpresion(getToken(1).kind)) {
+            registrarError("Se esperaba una expresion dentro de los parentesis");
+            return null;
+        }
+        elemento = Expresion();
+        if (elemento == null) return null;
+        if (getToken(1).kind != COMA) {
+            if (!coincidirToken(PAREN_DER)) {
                 registrarError("Se esperaba ')' para cerrar la agrupacion");
                 return null;
             }
-            TokenFisio tf = tokenFisioDe(t);
-            return new NodoAgrupacion(tf.linea(), tf.columna(), resultado);
+            return new NodoAgrupacion(apertura.beginLine, apertura.beginColumn, elemento);
         }
-    )
+        elementos.add(elemento);
+        while (coincidirToken(COMA)) {
+            if (getToken(1).kind == PAREN_DER) break;
+            if (!esInicioExpresion(getToken(1).kind)) {
+                registrarError("Se esperaba un elemento de tupla despues de ','");
+                return null;
+            }
+            elemento = Expresion();
+            if (elemento == null) return null;
+            elementos.add(elemento);
+        }
+        if (!coincidirToken(PAREN_DER)) {
+            registrarError("Se esperaba ')' para cerrar la tupla");
+            return null;
+        }
+        return new NodoTupla(apertura.beginLine, apertura.beginColumn, elementos);
+    }
+}
+
+NodoAST LiteralArreglo():
+{
+    Token apertura;
+    NodoAST elemento;
+    List<NodoAST> elementos = new ArrayList<NodoAST>();
+}
+{
+    apertura=<CORCHETE_IZQ>
+    {
+        if (coincidirToken(CORCHETE_DER))
+            return new NodoArreglo(apertura.beginLine, apertura.beginColumn, elementos);
+        while (true) {
+            if (!esInicioExpresion(getToken(1).kind)) {
+                registrarError("Se esperaba un elemento del arreglo");
+                return null;
+            }
+            elemento = Expresion();
+            if (elemento == null) return null;
+            elementos.add(elemento);
+            if (!coincidirToken(COMA)) break;
+            if (getToken(1).kind == CORCHETE_DER) break;
+        }
+        if (!coincidirToken(CORCHETE_DER)) {
+            registrarError("Se esperaba ']' para cerrar el arreglo");
+            return null;
+        }
+        return new NodoArreglo(apertura.beginLine, apertura.beginColumn, elementos);
+    }
+}
+
+NodoAST LiteralStruct(Token nombreTok):
+{
+    Token apertura;
+    List<NodoLiteralStruct.CampoValor> campos = new ArrayList<NodoLiteralStruct.CampoValor>();
+    NodoAST base = null;
+}
+{
+    apertura=<LLAVE_IZQ>
+    {
+        while (getToken(1).kind != LLAVE_DER && getToken(1).kind != EOF) {
+            if (getToken(1).kind == RANGO) {
+                getNextToken();
+                if (base != null) registrarError("La actualización '..base' solo puede aparecer una vez");
+                if (!esInicioExpresion(getToken(1).kind)) {
+                    registrarError("Se esperaba la expresión base después de '..'");
+                    sincronizarArgumento();
+                    break;
+                }
+                base = Expresion();
+                if (getToken(1).kind == COMA) getNextToken();
+                if (getToken(1).kind != LLAVE_DER) {
+                    registrarError("'..base' debe ser el último elemento del literal struct");
+                    sincronizarArgumento();
+                }
+                break;
+            }
+            if (getToken(1).kind != ID) {
+                registrarError("Se esperaba el nombre de un campo en el literal struct");
+                sincronizarArgumento();
+                break;
+            }
+            Token campoTok = getNextToken();
+            NodoAST valor;
+            if (coincidirToken(DOS_PUNTOS)) {
+                if (!esInicioExpresion(getToken(1).kind)) {
+                    registrarError("Se esperaba un valor para el campo '" + campoTok.image + "'");
+                    sincronizarArgumento();
+                    break;
+                }
+                valor = Expresion();
+            } else {
+                TokenFisio campo = tokenFisioDe(campoTok);
+                valor = new NodoIdentificador(campo.linea(), campo.columna(), campo);
+            }
+            if (valor != null) campos.add(new NodoLiteralStruct.CampoValor(tokenFisioDe(campoTok), valor));
+            if (getToken(1).kind == COMA) getNextToken();
+            else if (getToken(1).kind != LLAVE_DER) {
+                registrarError("Se esperaba ',' entre campos del literal struct");
+            }
+        }
+        if (!coincidirToken(LLAVE_DER)) registrarError("Se esperaba '}' para cerrar el literal struct");
+        TokenFisio tf = tokenFisioDe(nombreTok);
+        return new NodoLiteralStruct(tf.linea(), tf.columna(), tf, campos, base);
+    }
+}
+
+NodoAST LiteralVarianteNombrada(Token tipoTok, Token varianteTok):
+{
+    List<NodoLiteralStruct.CampoValor> campos = new ArrayList<NodoLiteralStruct.CampoValor>();
+}
+{
+    <LLAVE_IZQ>
+    {
+        while (getToken(1).kind != LLAVE_DER && getToken(1).kind != EOF) {
+            if (getToken(1).kind != ID) {
+                registrarError("Se esperaba el nombre de un campo en la variante");
+                sincronizarArgumento();
+                break;
+            }
+            Token campoTok = getNextToken();
+            NodoAST valor;
+            if (coincidirToken(DOS_PUNTOS)) {
+                if (!esInicioExpresion(getToken(1).kind)) {
+                    registrarError("Se esperaba un valor para el campo '" + campoTok.image + "'");
+                    sincronizarArgumento();
+                    break;
+                }
+                valor = Expresion();
+            } else {
+                TokenFisio campo = tokenFisioDe(campoTok);
+                valor = new NodoIdentificador(campo.linea(), campo.columna(), campo);
+            }
+            if (valor != null) campos.add(new NodoLiteralStruct.CampoValor(tokenFisioDe(campoTok), valor));
+            if (getToken(1).kind == COMA) getNextToken();
+            else if (getToken(1).kind != LLAVE_DER)
+                registrarError("Se esperaba ',' entre campos de la variante");
+        }
+        if (!coincidirToken(LLAVE_DER)) registrarError("Se esperaba '}' para cerrar la variante");
+        TokenFisio tf = tokenFisioDe(tipoTok);
+        return new NodoLiteralVariante(tf.linea(), tf.columna(), tf,
+            tokenFisioDe(varianteTok), campos);
+    }
+}
+
+NodoAST ExpresionMatch():
+{
+    Token matchTok;
+    NodoAST valor;
+    List<NodoMatch.Brazo> brazos = new ArrayList<NodoMatch.Brazo>();
+}
+{
+    matchTok=<MATCH>
+    valor = Expresion()
+    {
+        if (valor == null) return null;
+        if (!coincidirToken(LLAVE_IZQ)) {
+            registrarError("Se esperaba '{' para iniciar los brazos de match");
+            return null;
+        }
+        while (getToken(1).kind != LLAVE_DER && getToken(1).kind != EOF) {
+            PatronVariante patron = leerPatronVariante();
+            if (patron == null) {
+                sincronizarArgumento();
+                break;
+            }
+            NodoAST guardaBrazo = null;
+            if (coincidirToken(IF)) {
+                if (!esInicioExpresion(getToken(1).kind)) {
+                    registrarError("Se esperaba una condición después de 'if' en la guarda");
+                    sincronizarArgumento();
+                    break;
+                }
+                guardaBrazo = Expresion();
+            }
+            if (!coincidirToken(FLECHA_GRUESA)) {
+                registrarError("Se esperaba '=>' despues del patron de match");
+                sincronizarArgumento();
+                break;
+            }
+            if (!esInicioExpresion(getToken(1).kind)) {
+                registrarError("Se esperaba una expresion en el brazo de match");
+                sincronizarArgumento();
+                break;
+            }
+            NodoAST resultadoBrazo = Expresion();
+            brazos.add(new NodoMatch.Brazo(patron.linea(), patron.columna(), patron.comodin(),
+                patron.tipo(), patron.variante(), patron.vinculaciones(), patron.elementos(), patron.campos(),
+                patron.forma(), patron.resto(), guardaBrazo, resultadoBrazo));
+            if (getToken(1).kind == COMA) getNextToken();
+            else if (getToken(1).kind != LLAVE_DER && !(resultadoBrazo instanceof NodoBloque)) {
+                registrarError("Se esperaba ',' entre brazos de match");
+            }
+        }
+        if (!coincidirToken(LLAVE_DER)) registrarError("Se esperaba '}' para cerrar match");
+        TokenFisio tf = tokenFisioDe(matchTok);
+        return new NodoMatch(tf.linea(), tf.columna(), valor, brazos);
+    }
 }
 
 void Argumentos(List<NodoAST> lista):

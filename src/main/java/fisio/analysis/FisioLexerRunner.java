@@ -29,6 +29,8 @@ public final class FisioLexerRunner {
                     String mensaje = "Carácter no reconocido";
                     if (token.kind == FisioParserConstants.CADENA_INVALIDA)
                         mensaje = "Cadena sin cerrar o con escape no admitido";
+                    else if (token.kind == FisioParserConstants.CARACTER_INVALIDO)
+                        mensaje = "Literal de carácter inválido: debe contener un solo carácter o escape admitido";
                     else if (token.kind == FisioParserConstants.NUMERO_INVALIDO)
                         mensaje = "Número mal formado o formato numérico no admitido";
                     errores.add(new ErrorLexico(token.image, mensaje, token.beginLine, token.beginColumn));

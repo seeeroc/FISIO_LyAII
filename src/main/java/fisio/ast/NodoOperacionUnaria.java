@@ -2,7 +2,7 @@ package fisio.ast;
 
 import fisio.token.TokenFisio;
 
-/** NodoOperacionUnaria(NodoAST): operador: Token ('-' o '!'), operando: NodoAST. */
+/** Operación unaria de negación lógica, numérica o de bits. */
 public record NodoOperacionUnaria(int linea, int columna, TokenFisio operador, NodoAST operando)
         implements NodoAST {
 }

@@ -90,6 +90,7 @@ public final class TablaTokensPanel extends JPanel {
             case ID -> TemaFisio.COL_ID;
             case NUM -> TemaFisio.COL_NUM;
             case STRING -> TemaFisio.COL_STRING;
+            case CHAR -> TemaFisio.COL_STRING;
             case ERROR -> TemaFisio.COL_ERROR;
             case EOF -> TemaFisio.FG_MAIN;
         };

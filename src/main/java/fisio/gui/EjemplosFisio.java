@@ -4,21 +4,99 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Ejemplos del subconjunto Rust-like actual, en el orden mostrado por la GUI. */
+/** Fuentes de demostración y catálogo reducido mostrado por la GUI. */
 public final class EjemplosFisio {
 
     private static final Map<String, String> EJEMPLOS = crearEjemplos();
+    private static final Map<String, String> CATALOGO = crearCatalogo();
 
     private EjemplosFisio() {
     }
 
-    /** Nombre del ejemplo a código fuente. */
+    /** Ejemplos representativos disponibles en el selector de la interfaz. */
     public static Map<String, String> mapa() {
-        return EJEMPLOS;
+        return CATALOGO;
     }
 
     public static String codigoDe(String nombre) {
-        return EJEMPLOS.getOrDefault(nombre, "");
+        String visible = CATALOGO.get(nombre);
+        if (visible != null) return visible;
+        String interno = EJEMPLOS.get(nombre);
+        if (interno != null) return interno;
+        throw new IllegalArgumentException("Ejemplo desconocido: " + nombre);
+    }
+
+    private static Map<String, String> crearCatalogo() {
+        Map<String, String> catalogo = new LinkedHashMap<>();
+        agregarAlCatalogo(catalogo, "Fundamentos", "Rust-like - funciones y println!", "fundamentos");
+        agregarAlCatalogo(catalogo, "Código intermedio", "Rust-like - código intermedio (CI)", "ci");
+        agregarAlCatalogo(catalogo, "Tipos compuestos", "Rust-like - structs, enums y match", "tipos");
+        agregarAlCatalogo(catalogo, "Colecciones", "Rust-like - arreglos y tuplas", "colecciones");
+        agregarAlCatalogo(catalogo, "Constantes", "Rust-like - constantes", "constantes");
+        agregarAlCatalogo(catalogo, "Referencias", "Rust-like - referencias", "referencias");
+        agregarAlCatalogo(catalogo, "Métodos y traits", "Rust-like - traits", "traits");
+        agregarAlCatalogo(catalogo, "Patrones avanzados", "Rust-like - patrones anidados", "patrones");
+        agregarAlCatalogo(catalogo, "Errores semánticos", "Rust-like - errores", "errores");
+        agregarAlCatalogo(catalogo, "Programa extenso · matemáticas",
+            "Rust-like - programa extenso (matematicas)", "matematicas");
+        return Collections.unmodifiableMap(catalogo);
+    }
+
+    private static void agregarAlCatalogo(Map<String, String> catalogo, String nombre, String fuente,
+            String prefijo) {
+        String codigo = EJEMPLOS.get(fuente);
+        if (codigo == null) {
+            throw new IllegalStateException("No existe la fuente del ejemplo: " + fuente);
+        }
+        catalogo.put(nombre, ampliarEjemplo(codigo, prefijo));
+    }
+
+    private static String ampliarEjemplo(String codigo, String prefijo) {
+        StringBuilder funciones = new StringBuilder();
+        long lineas = contarLineasDeCodigo(codigo);
+        int numero = 1;
+        while (lineas < 200) {
+            String funcion = crearFuncionDeApoyo(prefijo, numero++);
+            funciones.append(funcion);
+            lineas += contarLineasDeCodigo(funcion);
+        }
+        int ultimaFuncion = numero - 1;
+        String ejemplo = ultimaFuncion == 0
+            ? codigo
+            : insertarUsoDeFunciones(codigo, prefijo, ultimaFuncion);
+        return funciones.append(ejemplo).toString();
+    }
+
+    private static String crearFuncionDeApoyo(String prefijo, int numero) {
+        String valorAnterior = numero == 1
+            ? "valor"
+            : "apoyo_" + prefijo + "_" + (numero - 1) + "(valor)";
+        return "fn apoyo_" + prefijo + "_" + numero + "(valor: i32) -> i32 {\n"
+            + "    let incremento = " + valorAnterior + " + " + numero + ";\n"
+            + "    let producto = incremento * 2;\n"
+            + "    let diferencia = producto - valor;\n"
+            + "    if diferencia >= 0 {\n"
+            + "        diferencia\n"
+            + "    } else {\n"
+            + "        -diferencia\n"
+            + "    }\n"
+            + "}\n\n";
+    }
+
+    private static String insertarUsoDeFunciones(String codigo, String prefijo, int ultimaFuncion) {
+        String apertura = "fn main() {\n";
+        if (!codigo.contains(apertura)) {
+            throw new IllegalStateException("El ejemplo no contiene una función main.");
+        }
+        String uso = apertura
+            + "    let resultado_apoyo_" + prefijo + " = apoyo_" + prefijo + "_"
+            + ultimaFuncion + "(1);\n"
+            + "    println!(\"Resultado de apoyo: {}\", resultado_apoyo_" + prefijo + ");\n";
+        return codigo.replace(apertura, uso);
+    }
+
+    private static long contarLineasDeCodigo(String codigo) {
+        return codigo.lines().filter(linea -> !linea.isBlank()).count();
     }
 
     private static Map<String, String> crearEjemplos() {
@@ -113,36 +191,439 @@ public final class EjemplosFisio {
             + "        resultado, residuo, negativo, acumulador);\n"
             + "}\n");
 
-        m.put("Rust-like - errores",
+        m.put("Rust-like - características ampliadas",
               "fn main() {\n"
-            + "    println!(\"hola\";\n"
-            + "    for x in ..10 {\n"
+            + "    let letra: char = 'R';\n"
+            + "    let bits: u8 = 5;\n"
+            + "    let desplazado = (bits << 1) | 1;\n"
+            + "    let numero = true as i32;\n"
+            + "\n"
+            + "    let etiqueta = if desplazado > 5 { 'A' } else { 'B' };\n"
+            + "    let calculo = {\n"
+            + "        let base = 2;\n"
+            + "        base * 3\n"
+            + "    };\n"
+            + "\n"
+            + "    let mut mascara: u8 = 3;\n"
+            + "    mascara <<= 1;\n"
+            + "    mascara |= 1;\n"
+            + "\n"
+            + "    let mut contador = 0;\n"
+            + "    loop {\n"
+            + "        contador += 1;\n"
+            + "        if contador < 3 { continue; }\n"
+            + "        break;\n"
             + "    }\n"
-            + "    x += ;\n"
-            + "    foo(,);\n"
+            + "\n"
+            + "    println!(\"{} {} {} {} {} {}\", letra, etiqueta, desplazado, calculo, numero, mascara);\n"
             + "}\n");
 
-        // Ejemplo extenso (291 lineas) que ejercita en un solo programa
-        // todo el subconjunto Rust-like soportado: fn con parametros y
-        // tipo de retorno, let/let mut, if/else/else if, while, for..in
-        // con rangos, loop, return, asignaciones compuestas, llamadas a
-        // funcion, macro println!, operadores aritmeticos/relacionales/
-        // logicos/unarios y expresion final de bloque.
-        // 0 errores lexicos, 0 errores sintacticos (verificado).
+        m.put("Rust-like - structs, enums y match",
+              "struct Punto {\n"
+            + "    x: i32,\n"
+            + "    y: i32,\n"
+            + "}\n"
+            + "\n"
+            + "enum Estado {\n"
+            + "    Activo,\n"
+            + "    Inactivo,\n"
+            + "}\n"
+            + "\n"
+            + "fn distancia_cuadrada(punto: Punto) -> i32 {\n"
+            + "    punto.x * punto.x + punto.y * punto.y\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    let punto = Punto { x: 3, y: 4 };\n"
+            + "    let estado = Estado::Activo;\n"
+            + "    let descripcion = match estado {\n"
+            + "        Estado::Activo => \"activo\",\n"
+            + "        Estado::Inactivo => \"inactivo\",\n"
+            + "    };\n"
+            + "    let distancia = distancia_cuadrada(punto);\n"
+            + "    println!(\"Estado: {}, distancia al cuadrado: {}\", descripcion, distancia);\n"
+            + "}\n");
+
+        m.put("Rust-like - arreglos y tuplas",
+              "fn sumar(valores: [i32; 4]) -> i32 {\n"
+            + "    let mut total = 0;\n"
+            + "    for valor in valores {\n"
+            + "        total += valor;\n"
+            + "    }\n"
+            + "    total\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    let mut valores: [i32; 4] = [2, 4, 6, 8];\n"
+            + "    valores[2] = 10;\n"
+            + "\n"
+            + "    let datos: (i32, bool, char) = (valores[0], true, 'F');\n"
+            + "    let primero = datos.0;\n"
+            + "    let activo = datos.1;\n"
+            + "    let inicial = datos.2;\n"
+            + "\n"
+            + "    println!(\"Primero: {}, activo: {}, inicial: {}, suma: {}\",\n"
+            + "        primero, activo, inicial, sumar(valores));\n"
+            + "}\n");
+
+        m.put("Rust-like - constantes",
+              "const BASE: i32 = 10;\n"
+            + "const DOBLE: i32 = BASE * 2;\n"
+            + "const VALORES: [i32; 3] = [BASE, DOBLE, 30];\n"
+            + "const CONFIGURACION: (bool, char) = (true, 'F');\n"
+            + "\n"
+            + "fn escalar(valor: i32) -> i32 {\n"
+            + "    const FACTOR: i32 = 2;\n"
+            + "    valor * FACTOR + BASE\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    const AJUSTE: i32 = 5;\n"
+            + "    let resultado = escalar(VALORES[1]) + AJUSTE;\n"
+            + "    let activa = CONFIGURACION.0;\n"
+            + "    let inicial = CONFIGURACION.1;\n"
+            + "    println!(\"Resultado: {}, activa: {}, inicial: {}\", resultado, activa, inicial);\n"
+            + "}\n");
+
+        m.put("Rust-like - visibilidad pub",
+              "pub const LIMITE: i32 = 100;\n"
+            + "\n"
+            + "pub struct Medicion {\n"
+            + "    pub valor: i32,\n"
+            + "    pub valida: bool,\n"
+            + "}\n"
+            + "\n"
+            + "pub enum Estado {\n"
+            + "    Activo,\n"
+            + "    Inactivo,\n"
+            + "}\n"
+            + "\n"
+            + "pub fn limitar(valor: i32) -> i32 {\n"
+            + "    if valor > LIMITE { LIMITE } else { valor }\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    let medicion = Medicion { valor: limitar(120), valida: true };\n"
+            + "    let estado = Estado::Activo;\n"
+            + "    let codigo = match estado {\n"
+            + "        Estado::Activo => 1,\n"
+            + "        Estado::Inactivo => 0,\n"
+            + "    };\n"
+            + "    println!(\"Valor: {}, válida: {}, estado: {}\", medicion.valor, medicion.valida, codigo);\n"
+            + "}\n");
+
+        m.put("Rust-like - alias de tipos",
+              "pub type Entero = i32;\n"
+            + "type Vector3 = [Entero; 3];\n"
+            + "type Punto = (Entero, Entero);\n"
+            + "\n"
+            + "struct Medicion {\n"
+            + "    valores: Vector3,\n"
+            + "    origen: Punto,\n"
+            + "}\n"
+            + "\n"
+            + "fn sumar(valores: Vector3) -> Entero {\n"
+            + "    let mut total: Entero = 0;\n"
+            + "    for valor in valores { total += valor; }\n"
+            + "    total\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    let datos: Vector3 = [10, 20, 30];\n"
+            + "    let origen: Punto = (0, 0);\n"
+            + "    let medicion = Medicion { valores: datos, origen: origen };\n"
+            + "    let resultado: Entero = sumar(medicion.valores);\n"
+            + "    println!(\"Suma: {}, origen x: {}\", resultado, medicion.origen.0);\n"
+            + "}\n");
+
+        m.put("Rust-like - elementos static",
+              "const BASE: i32 = 10;\n"
+            + "pub static VERSION: i32 = 1;\n"
+            + "static MAXIMO: i32 = BASE * 10;\n"
+            + "static NOMBRE: String = \"FISIO\";\n"
+            + "static BANDERAS: [bool; 2] = [true, false];\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    static AJUSTE: i32 = BASE + 5;\n"
+            + "    let resultado = MAXIMO + AJUSTE;\n"
+            + "    println!(\"{} v{}: {}, activo: {}\", NOMBRE, VERSION, resultado, BANDERAS[0]);\n"
+            + "}\n");
+
+        m.put("Rust-like - referencias",
+              "fn leer(valor: &i32) -> i32 {\n"
+            + "    *valor\n"
+            + "}\n"
+            + "\n"
+            + "fn incrementar(valor: &mut i32) {\n"
+            + "    *valor += 1;\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    let mut contador: i32 = 10;\n"
+            + "    let compartida: &i32 = &contador;\n"
+            + "    let copia = leer(compartida);\n"
+            + "    let mutable: &mut i32 = &mut contador;\n"
+            + "    *mutable += 5;\n"
+            + "    incrementar(mutable);\n"
+            + "    let resultado = *mutable + copia;\n"
+            + "    println!(\"Resultado: {}\", resultado);\n"
+            + "}\n");
+
+        m.put("Rust-like - impl y metodos",
+              "struct Punto {\n"
+            + "    x: i32,\n"
+            + "    y: i32,\n"
+            + "}\n"
+            + "\n"
+            + "impl Punto {\n"
+            + "    pub fn nuevo(x: i32, y: i32) -> Punto {\n"
+            + "        Punto { x: x, y: y }\n"
+            + "    }\n"
+            + "\n"
+            + "    fn origen() -> Punto {\n"
+            + "        Punto { x: 0, y: 0 }\n"
+            + "    }\n"
+            + "\n"
+            + "    fn suma(&self) -> i32 {\n"
+            + "        self.x + self.y\n"
+            + "    }\n"
+            + "\n"
+            + "    fn mover_x(&mut self, delta: i32) {\n"
+            + "        self.x += delta;\n"
+            + "    }\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    let mut punto = Punto::nuevo(4, 6);\n"
+            + "    let cero = Punto::origen();\n"
+            + "    let antes = punto.suma();\n"
+            + "    punto.mover_x(3);\n"
+            + "    let despues = punto.suma();\n"
+            + "    println!(\"Antes: {}, después: {}, origen: {}\", antes, despues, cero.x);\n"
+            + "}\n");
+
+        m.put("Rust-like - traits",
+              "pub trait Medible {\n"
+            + "    fn crear(valor: i32) -> Self;\n"
+            + "    fn valor(&self) -> i32;\n"
+            + "    fn ajustar(&mut self, cantidad: i32);\n"
+            + "}\n"
+            + "\n"
+            + "struct Medicion {\n"
+            + "    dato: i32,\n"
+            + "}\n"
+            + "\n"
+            + "impl Medible for Medicion {\n"
+            + "    fn crear(valor: i32) -> Medicion {\n"
+            + "        Medicion { dato: valor }\n"
+            + "    }\n"
+            + "\n"
+            + "    fn valor(&self) -> i32 {\n"
+            + "        self.dato\n"
+            + "    }\n"
+            + "\n"
+            + "    fn ajustar(&mut self, cantidad: i32) {\n"
+            + "        self.dato += cantidad;\n"
+            + "    }\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    let mut medicion = Medicion::crear(10);\n"
+            + "    medicion.ajustar(5);\n"
+            + "    let resultado = medicion.valor();\n"
+            + "    println!(\"Medición: {}\", resultado);\n"
+            + "}\n");
+
+        m.put("Rust-like - datos algebraicos",
+              "struct Coordenada(pub i32, pub i32);\n"
+            + "\n"
+            + "enum Resultado {\n"
+            + "    Exito(i32),\n"
+            + "    Par(i32, i32),\n"
+            + "    Error(String),\n"
+            + "    Vacio,\n"
+            + "}\n"
+            + "\n"
+            + "fn extraer(resultado: Resultado) -> i32 {\n"
+            + "    match resultado {\n"
+            + "        Resultado::Exito(valor) => valor,\n"
+            + "        Resultado::Par(a, b) => a + b,\n"
+            + "        Resultado::Error(_) => 0,\n"
+            + "        Resultado::Vacio => 0,\n"
+            + "    }\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    let mut punto = Coordenada(3, 4);\n"
+            + "    punto.0 += 2;\n"
+            + "    let primero = Resultado::Exito(punto.0);\n"
+            + "    let segundo = Resultado::Par(punto.0, punto.1);\n"
+            + "    let total = extraer(primero) + extraer(segundo);\n"
+            + "    println!(\"Punto: ({}, {}), total: {}\", punto.0, punto.1, total);\n"
+            + "}\n");
+
+        m.put("Rust-like - enums nombrados y guardas",
+              "enum Mensaje {\n"
+            + "    Mover { x: i32, y: i32 },\n"
+            + "    Escribir(String),\n"
+            + "    Cerrar,\n"
+            + "}\n"
+            + "\n"
+            + "fn prioridad(mensaje: Mensaje) -> i32 {\n"
+            + "    match mensaje {\n"
+            + "        Mensaje::Mover { x, y } if x == y => x + y,\n"
+            + "        Mensaje::Mover { x: horizontal, y: _ } => horizontal,\n"
+            + "        Mensaje::Escribir(_) => 1,\n"
+            + "        Mensaje::Cerrar => 0,\n"
+            + "    }\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    let x = 4;\n"
+            + "    let movimiento = Mensaje::Mover { x, y: 4 };\n"
+            + "    let texto = Mensaje::Escribir(\"FISIO\");\n"
+            + "    let a = prioridad(movimiento);\n"
+            + "    let b = prioridad(texto);\n"
+            + "    println!(\"Prioridades: {} y {}\", a, b);\n"
+            + "}\n");
+
+        m.put("Rust-like - actualización y patrones parciales",
+              "struct Configuracion {\n"
+            + "    ancho: i32,\n"
+            + "    alto: i32,\n"
+            + "    activa: bool,\n"
+            + "}\n"
+            + "\n"
+            + "enum Evento {\n"
+            + "    Punto { x: i32, y: i32, z: i32 },\n"
+            + "    Color(i32, i32, i32),\n"
+            + "    Nada,\n"
+            + "}\n"
+            + "\n"
+            + "fn resumir(evento: Evento) -> i32 {\n"
+            + "    match evento {\n"
+            + "        Evento::Punto { x, .. } => x,\n"
+            + "        Evento::Color(rojo, ..) => rojo,\n"
+            + "        Evento::Nada => 0,\n"
+            + "    }\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    let base = Configuracion { ancho: 80, alto: 60, activa: true };\n"
+            + "    let ancho = 120;\n"
+            + "    let actual = Configuracion { ancho, ..base };\n"
+            + "    let punto = Evento::Punto { x: actual.ancho, y: actual.alto, z: 5 };\n"
+            + "    let color = Evento::Color(255, 128, 64);\n"
+            + "    let total = resumir(punto) + resumir(color);\n"
+            + "    println!(\"Resumen: {}\", total);\n"
+            + "}\n");
+
+        m.put("Rust-like - if let y while let",
+              "enum Evento {\n"
+            + "    Dato { valor: i32, activo: bool },\n"
+            + "    Fin,\n"
+            + "}\n"
+            + "\n"
+            + "fn leer(evento: Evento) -> i32 {\n"
+            + "    if let Evento::Dato { valor, .. } = evento && valor >= 0 {\n"
+            + "        valor\n"
+            + "    } else {\n"
+            + "        0\n"
+            + "    }\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    let mut evento = Evento::Dato { valor: 3, activo: true };\n"
+            + "    let inicial = leer(evento);\n"
+            + "    while let Evento::Dato { valor, .. } = evento && valor > 0 {\n"
+            + "        println!(\"Valor actual: {}\", valor);\n"
+            + "        if valor > 1 {\n"
+            + "            evento = Evento::Dato { valor: valor - 1, activo: true };\n"
+            + "        } else {\n"
+            + "            evento = Evento::Fin;\n"
+            + "        }\n"
+            + "    }\n"
+            + "    println!(\"Valor inicial: {}\", inicial);\n"
+            + "}\n");
+
+        m.put("Rust-like - let else",
+              "enum Lectura {\n"
+            + "    Dato { numero: i32, valida: bool },\n"
+            + "    Fin,\n"
+            + "}\n"
+            + "\n"
+            + "fn obtener_doble(lectura: Lectura) -> i32 {\n"
+            + "    let Lectura::Dato { numero, .. } = lectura else {\n"
+            + "        return 0;\n"
+            + "    };\n"
+            + "\n"
+            + "    let doble = numero * 2;\n"
+            + "    doble\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    let lectura = Lectura::Dato { numero: 21, valida: true };\n"
+            + "    let resultado = obtener_doble(lectura);\n"
+            + "    println!(\"Doble: {}\", resultado);\n"
+            + "}\n");
+
+        m.put("Rust-like - patrones anidados",
+              "enum Opcion {\n"
+            + "    Valor(i32),\n"
+            + "    Nada,\n"
+            + "}\n"
+            + "\n"
+            + "enum Mensaje {\n"
+            + "    Dato(Opcion),\n"
+            + "    Paquete { contenido: Opcion, activo: bool },\n"
+            + "    Fin,\n"
+            + "}\n"
+            + "\n"
+            + "fn leer(mensaje: Mensaje) -> i32 {\n"
+            + "    match mensaje {\n"
+            + "        Mensaje::Dato(Opcion::Valor(numero)) if numero > 0 => numero,\n"
+            + "        Mensaje::Dato(Opcion::Valor(_)) => 0,\n"
+            + "        Mensaje::Dato(Opcion::Nada) => 0,\n"
+            + "        Mensaje::Paquete { contenido: Opcion::Valor(numero), .. } => numero,\n"
+            + "        Mensaje::Paquete { contenido: Opcion::Nada, .. } => 0,\n"
+            + "        Mensaje::Fin => 0,\n"
+            + "    }\n"
+            + "}\n"
+            + "\n"
+            + "fn exigir_dato(mensaje: Mensaje) -> i32 {\n"
+            + "    let Mensaje::Dato(Opcion::Valor(numero)) = mensaje else {\n"
+            + "        return 0;\n"
+            + "    };\n"
+            + "    numero\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    let dato = Mensaje::Dato(Opcion::Valor(21));\n"
+            + "    let paquete = Mensaje::Paquete { contenido: Opcion::Valor(7), activo: true };\n"
+            + "    let a = leer(dato);\n"
+            + "    let b = exigir_dato(Mensaje::Dato(Opcion::Valor(5)));\n"
+            + "    if let Mensaje::Paquete { contenido: Opcion::Valor(numero), .. } = paquete && numero > 0 {\n"
+            + "        println!(\"Valores: {} {} {}\", a, b, numero);\n"
+            + "    }\n"
+            + "}\n");
+
+        m.put("Rust-like - errores",
+              "fn sumar(a: i32, b: i32) -> i32 {\n"
+            + "    a + b\n"
+            + "}\n"
+            + "\n"
+            + "fn main() {\n"
+            + "    let mut contador: i32 = 0;\n"
+            + "    contador = \"texto\";\n"
+            + "    let total = sumar(contador, variable_fantasma);\n"
+            + "    if contador {\n"
+            + "        contador += 1;\n"
+            + "    }\n"
+            + "    println!(\"Total: {}\", total);\n"
+            + "}\n");
+
         m.put("Rust-like - programa extenso (matematicas)",
-              "// ============================================================\n"
-            + "// Ejemplo extenso Rust-like para FISIO.\n"
-            + "// Cubre el subconjunto sintactico soportado por FISIO.jj: fn/let/mut,\n"
-            + "// tipos anotados, tipo de retorno \"->\", if/else/else if, while, for..in\n"
-            + "// con rangos, loop, return, asignaciones compuestas (+= -= *= /= %=),\n"
-            + "// llamadas a funcion, macro println!(...), operadores aritmeticos,\n"
-            + "// relacionales y logicos, unarios (-, !) y expresion final de bloque.\n"
-            + "// Sin ejecucion real: solo demuestra reconocimiento lexico/sintactico.\n"
-            + "// ============================================================\n"
-            + "\n"
-            + "/* Funciones matematicas basicas */\n"
-            + "\n"
-            + "fn cuadrado(x: i32) -> i32 {\n"
+              "fn cuadrado(x: i32) -> i32 {\n"
             + "    x * x\n"
             + "}\n"
             + "\n"
@@ -174,8 +655,6 @@ public final class EjemplosFisio {
             + "    }\n"
             + "}\n"
             + "\n"
-            + "/* Numeros: paridad y primalidad */\n"
-            + "\n"
             + "fn es_par(n: i32) -> bool {\n"
             + "    n % 2 == 0\n"
             + "}\n"
@@ -201,8 +680,6 @@ public final class EjemplosFisio {
             + "\n"
             + "    primo\n"
             + "}\n"
-            + "\n"
-            + "/* Secuencias clasicas con while */\n"
             + "\n"
             + "fn factorial(n: i32) -> i32 {\n"
             + "    let mut resultado = 1;\n"
@@ -242,8 +719,6 @@ public final class EjemplosFisio {
             + "\n"
             + "    resultado\n"
             + "}\n"
-            + "\n"
-            + "/* Rangos con for..in */\n"
             + "\n"
             + "fn suma_rango(inicio: i32, fin: i32) -> i32 {\n"
             + "    let mut total = 0;\n"
@@ -289,8 +764,6 @@ public final class EjemplosFisio {
             + "    contador\n"
             + "}\n"
             + "\n"
-            + "/* Geometria y comparaciones */\n"
-            + "\n"
             + "fn promedio(a: i32, b: i32, c: i32) -> i32 {\n"
             + "    (a + b + c) / 3\n"
             + "}\n"
@@ -322,8 +795,6 @@ public final class EjemplosFisio {
             + "    }\n"
             + "}\n"
             + "\n"
-            + "/* loop y operadores logicos */\n"
-            + "\n"
             + "fn demo_loop() -> i32 {\n"
             + "    let mut contador = 0;\n"
             + "\n"
@@ -343,8 +814,6 @@ public final class EjemplosFisio {
             + "\n"
             + "    (y_logico || o_logico) && !negado\n"
             + "}\n"
-            + "\n"
-            + "/* Programa principal: usa todo lo anterior */\n"
             + "\n"
             + "fn main() {\n"
             + "    println!(\"=== Ejemplo extenso Rust-like para FISIO ===\");\n"
@@ -424,4 +893,5 @@ public final class EjemplosFisio {
 
         return Collections.unmodifiableMap(m);
     }
+
 }

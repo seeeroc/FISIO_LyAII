@@ -87,6 +87,7 @@ public final class EditorCodigoPanel extends JPanel {
         crearEstiloCategoria("ID", TemaFisio.COL_ID, false, false, false);
         crearEstiloCategoria("NUM", TemaFisio.COL_NUM, false, false, false);
         crearEstiloCategoria("STRING", TemaFisio.COL_STRING, false, false, false);
+        crearEstiloCategoria("CHAR", TemaFisio.COL_STRING, false, false, false);
         crearEstiloCategoria("ERROR", TemaFisio.COL_ERROR, false, true, true);
 
         texto.getDocument().addDocumentListener(new DocumentListener() {

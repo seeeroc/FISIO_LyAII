@@ -56,7 +56,7 @@ public final class TemaFisio {
         return new Font(FAMILIA_MONO, estilo, tamano);
     }
 
-    /** Fuente de interfaz (toolbar, tabs, status bar, etiquetas). */
+    /** Fuente de controles, navegación, barra de estado y etiquetas. */
     public static Font fuenteUi(int estilo, int tamano) {
         return new Font(FAMILIA_UI, estilo, tamano);
     }

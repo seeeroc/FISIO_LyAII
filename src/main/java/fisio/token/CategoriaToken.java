@@ -9,6 +9,7 @@ public enum CategoriaToken {
     ID,
     NUM,
     STRING,
+    CHAR,
     ERROR,
     EOF
 }

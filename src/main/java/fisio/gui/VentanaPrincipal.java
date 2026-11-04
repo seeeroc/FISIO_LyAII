@@ -16,6 +16,7 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 /** Documento y presentación en EDT; el coordinador ejecuta las fases en segundo plano. */
 public final class VentanaPrincipal extends JFrame {
     private static final String TITULO_BASE = "FISIO — Analizador de código";
+    private static final System.Logger LOG = System.getLogger(VentanaPrincipal.class.getName());
     private final EditorCodigoPanel editor = new EditorCodigoPanel();
     private final TablaTokensPanel tablaTokens = new TablaTokensPanel();
     private final PanelResumen panelResumen = new PanelResumen();
@@ -27,10 +28,11 @@ public final class VentanaPrincipal extends JFrame {
     private final CardLayout tarjetas = new CardLayout();
     private final JPanel resultados = new JPanel(tarjetas);
     private final JList<String> navegacion = new JList<>(new String[]{"Tokens", "Resumen", "Alfabeto FISIO", "Alfabeto Rust", "Léxico", "Sintáctico", "Semántico", "Código Intermedio (CI)"});
+    private final JComboBox<String> selectorEjemplos = new JComboBox<>();
     private final JLabel lblArchivo = etiqueta("Sin archivo");
     private final JLabel lblCursor = etiqueta("Línea: 1 | Columna: 1");
     private final JLabel lblEstado = etiqueta("Listo · Ejecuta con F5");
-    private final Action ejecutar = accion("Ejecutar [F5]", this::ejecutarAnalisisCompleto);
+    private final Action ejecutar = accion("Analizar código  F5", this::ejecutarAnalisisCompleto);
     private Path archivoActual;
     private CoordinadorAnalisis.Resultado ultimoResultado;
     private SwingWorker<CoordinadorAnalisis.Resultado, Void> tarea;
@@ -53,7 +55,7 @@ public final class VentanaPrincipal extends JFrame {
         atajo("F6", "verSintactico", accion("Sintáctico", () -> seleccionar("Sintáctico")));
         atajo("F7", "verSemantico", accion("Semántico", () -> seleccionar("Semántico")));
         atajo("F8", "verCodigoIntermedio", accion("Código Intermedio", () -> seleccionar("Código Intermedio (CI)")));
-        cargarEjemplo("Rust-like - declaraciones y control");
+        cargarEjemplo("Fundamentos");
     }
 
     private static Action accion(String nombre, Runnable trabajo) {
@@ -76,45 +78,65 @@ public final class VentanaPrincipal extends JFrame {
         p.setBackground(TemaFisio.BG_TOOLBAR);
         return p;
     }
-    private static JButton boton(Action accion, boolean principal) {
+    private static JButton boton(Action accion, boolean principal, String ayuda) {
         JButton b = new JButton(accion);
         b.setFont(TemaFisio.fuenteUi(Font.BOLD, 12));
         b.setBackground(principal ? TemaFisio.ACCENT : TemaFisio.BG_MAIN);
         b.setForeground(principal ? TemaFisio.BG_MAIN : TemaFisio.FG_MAIN);
-        b.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(TemaFisio.BORDER),
+        b.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(
+            principal ? TemaFisio.ACCENT : TemaFisio.BORDER),
             BorderFactory.createEmptyBorder(9, 14, 9, 14)));
+        b.setFocusPainted(false);
+        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        b.setToolTipText(ayuda);
         return b;
     }
     private JPanel construirToolbar() {
         JPanel barra = panel();
-        barra.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
+        barra.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, TemaFisio.BORDER),
+            BorderFactory.createEmptyBorder(10, 12, 10, 12)));
+
         JPanel archivos = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         archivos.setOpaque(false);
-        archivos.add(boton(accion("Abrir", this::abrirArchivo), false));
-        archivos.add(boton(accion("Guardar", this::guardarArchivo), false));
-        archivos.add(boton(accion("Limpiar", this::limpiarTodo), false));
+        archivos.add(boton(accion("Abrir", this::abrirArchivo), false, "Abrir un archivo .fisio"));
+        archivos.add(boton(accion("Guardar", this::guardarArchivo), false, "Guardar el código actual"));
+        JSeparator separador = new JSeparator(SwingConstants.VERTICAL);
+        separador.setPreferredSize(new Dimension(1, 30));
+        archivos.add(Box.createHorizontalStrut(4));
+        archivos.add(separador);
+        archivos.add(Box.createHorizontalStrut(4));
+        archivos.add(boton(accion("Limpiar editor", this::limpiarTodo), false,
+            "Vaciar el editor y los resultados"));
         barra.add(archivos, BorderLayout.WEST);
-        JPanel centro = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
-        centro.setOpaque(false);
-        centro.add(boton(ejecutar, true));
-        barra.add(centro, BorderLayout.CENTER);
-        JComboBox<String> ejemplos = new JComboBox<>();
-        ejemplos.addItem("Ejemplos…");
-        EjemplosFisio.mapa().keySet().forEach(ejemplos::addItem);
-        ejemplos.setPreferredSize(new Dimension(240, 36));
-        ejemplos.setToolTipText("Cargar un ejemplo en el editor");
-        ejemplos.addActionListener(e -> {
-            if (ejemplos.getSelectedIndex() > 0) {
-                cargarEjemplo((String) ejemplos.getSelectedItem());
-                ejemplos.setSelectedIndex(0);
+
+        JPanel acciones = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        acciones.setOpaque(false);
+        JLabel etiquetaEjemplo = etiqueta("Ejemplo:");
+        etiquetaEjemplo.setForeground(TemaFisio.FG_DIM);
+        acciones.add(etiquetaEjemplo);
+        selectorEjemplos.addItem("Seleccionar…");
+        EjemplosFisio.mapa().keySet().forEach(selectorEjemplos::addItem);
+        selectorEjemplos.setPreferredSize(new Dimension(220, 36));
+        selectorEjemplos.setFont(TemaFisio.fuenteUi(Font.PLAIN, 12));
+        selectorEjemplos.setBackground(TemaFisio.BG_MAIN);
+        selectorEjemplos.setForeground(TemaFisio.FG_MAIN);
+        selectorEjemplos.setToolTipText("Reemplazar el editor con un ejemplo actual de FISIO");
+        selectorEjemplos.addActionListener(e -> {
+            if (selectorEjemplos.getSelectedIndex() > 0) {
+                cargarEjemplo((String) selectorEjemplos.getSelectedItem());
+                selectorEjemplos.setSelectedIndex(0);
             }
         });
-        barra.add(ejemplos, BorderLayout.EAST);
+        acciones.add(selectorEjemplos);
+        acciones.add(Box.createHorizontalStrut(6));
+        acciones.add(boton(ejecutar, true, "Ejecutar todas las fases del analizador"));
+        barra.add(acciones, BorderLayout.EAST);
         return barra;
     }
     private JSplitPane construirCuerpo() {
         JPanel fuente = panel();
-        JLabel titulo = etiqueta("CÓDIGO FUENTE");
+        JLabel titulo = etiqueta("CÓDIGO FISIO");
         titulo.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
         fuente.add(titulo, BorderLayout.NORTH);
         fuente.add(editor);
@@ -147,11 +169,12 @@ public final class VentanaPrincipal extends JFrame {
         JPanel derecha = panel();
         derecha.add(navegacion, BorderLayout.WEST);
         derecha.add(resultados);
+        derecha.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, TemaFisio.BORDER));
         derecha.setMinimumSize(new Dimension(450, 0));
         seleccionar("Resumen");
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, fuente, derecha);
-        split.setResizeWeight(.43);
-        split.setDividerLocation(480);
+        split.setResizeWeight(.46);
+        split.setDividerLocation(520);
         split.setContinuousLayout(true);
         split.setDividerSize(6);
         split.setBorder(BorderFactory.createEmptyBorder());
@@ -165,10 +188,15 @@ public final class VentanaPrincipal extends JFrame {
     private void seleccionar(String nombre) { navegacion.setSelectedValue(nombre, true); }
     private JPanel construirStatusBar() {
         JPanel estado = panel();
-        estado.setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
-        estado.add(lblArchivo, BorderLayout.CENTER);
+        estado.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(1, 0, 0, 0, TemaFisio.BORDER),
+            BorderFactory.createEmptyBorder(7, 12, 7, 12)));
+        lblArchivo.setForeground(TemaFisio.FG_DIM);
+        lblCursor.setForeground(TemaFisio.FG_DIM);
+        lblEstado.setHorizontalAlignment(SwingConstants.CENTER);
+        estado.add(lblArchivo, BorderLayout.WEST);
+        estado.add(lblEstado, BorderLayout.CENTER);
         estado.add(lblCursor, BorderLayout.EAST);
-        estado.add(lblEstado, BorderLayout.SOUTH);
         return estado;
     }
     private void estados(EstadoAnalisis estado, String mensaje, boolean mostrar) {
@@ -211,8 +239,10 @@ public final class VentanaPrincipal extends JFrame {
         tarea.execute();
     }
     private void errorInterno(Throwable ex) {
-        ex.printStackTrace();
-        estados(EstadoAnalisis.ERROR_INTERNO, "No se pudo completar el análisis por un error interno. " + ex.getClass().getSimpleName(), false);
+        Throwable causa = ex == null ? new IllegalStateException("Causa no disponible") : ex;
+        LOG.log(System.Logger.Level.ERROR, "No se pudo completar el análisis", causa);
+        estados(EstadoAnalisis.ERROR_INTERNO,
+            "No se pudo completar el análisis por un error interno. " + causa.getClass().getSimpleName(), false);
         lblEstado.setText("Error interno · No hay resultados completos");
     }
     private void presentarResultados() {
@@ -277,6 +307,7 @@ public final class VentanaPrincipal extends JFrame {
         ultimoResultado = null;
         codigoEnAnalisis = null;
         tablaTokens.limpiar();
+        panelLexico.limpiar();
         panelResumen.limpiar();
         panelSintactico.limpiar();
         panelSemantico.limpiar();
@@ -307,7 +338,7 @@ public final class VentanaPrincipal extends JFrame {
         try {
             contenido = leerUtf8ConFallback(ruta);
         } catch (IOException ex) {
-            ex.printStackTrace();
+            LOG.log(System.Logger.Level.ERROR, "No se pudo abrir el archivo " + ruta, ex);
             JOptionPane.showMessageDialog(this,
                 "No se pudo abrir el archivo:\n" + ruta,
                 "Error al abrir", JOptionPane.ERROR_MESSAGE);
@@ -365,7 +396,7 @@ public final class VentanaPrincipal extends JFrame {
         try {
             Files.writeString(destino, editor.getCodigo(), StandardCharsets.UTF_8);
         } catch (IOException ex) {
-            ex.printStackTrace();
+            LOG.log(System.Logger.Level.ERROR, "No se pudo guardar el archivo " + destino, ex);
             JOptionPane.showMessageDialog(this,
                 "No se pudo guardar el archivo:\n" + destino,
                 "Error al guardar", JOptionPane.ERROR_MESSAGE);
@@ -380,7 +411,6 @@ public final class VentanaPrincipal extends JFrame {
             "Guardado", JOptionPane.INFORMATION_MESSAGE);
     }
 
-    // ── Acciones: Ejemplos / Limpiar ──────────────────────────
     private void cargarEjemplo(String nombre) {
         editor.setCodigo(EjemplosFisio.codigoDe(nombre));
         archivoActual = null;

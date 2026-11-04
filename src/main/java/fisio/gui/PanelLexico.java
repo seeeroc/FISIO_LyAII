@@ -27,4 +27,8 @@ final class PanelLexico extends JPanel {
         texto.setText(salida.toString());
         texto.setCaretPosition(0);
     }
+
+    void limpiar() {
+        texto.setText("");
+    }
 }

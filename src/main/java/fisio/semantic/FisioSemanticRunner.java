@@ -18,7 +18,7 @@ public final class FisioSemanticRunner {
         return analizar(lexico, FisioParserRunner.parse(codigo));
     }
 
-    /** Los dos resultados deben pertenecer al mismo texto, como garantiza la GUI. */
+    /** Analiza resultados ya obtenidos por el mismo pipeline léxico/sintáctico. */
     public static ResultadoSemantico analizar(ResultadoLexico lexico, ResultadoSintactico sintaxis) {
         Objects.requireNonNull(lexico, "lexico");
         Objects.requireNonNull(sintaxis, "sintaxis");

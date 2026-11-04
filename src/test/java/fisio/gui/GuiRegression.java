@@ -83,12 +83,159 @@ public final class GuiRegression {
         });
     }
     public static void main(String[] args) throws Exception {
+        try {
+            EjemplosFisio.codigoDe("ejemplo inexistente");
+            throw new AssertionError("Una clave desconocida no debe vaciar silenciosamente el editor");
+        } catch (IllegalArgumentException esperado) {
+            comprobar(esperado.getMessage().contains("ejemplo inexistente"),
+                "El error de ejemplo desconocido no identifica la clave");
+        }
+        for (Map.Entry<String, String> ejemplo : EjemplosFisio.mapa().entrySet()) {
+            String codigo = ejemplo.getValue();
+            long lineas = codigo.lines().filter(linea -> !linea.isBlank()).count();
+            comprobar(lineas >= 200, ejemplo.getKey() + " tiene menos de 200 líneas de código");
+            boolean contieneComentarios = codigo.contains("//") || codigo.contains("/*") || codigo.contains("*/");
+            comprobar(!contieneComentarios, ejemplo.getKey() + " contiene comentarios");
+            var lexicoEjemplo = fisio.analysis.FisioLexerRunner.tokenize(codigo);
+            var sintaxisEjemplo = fisio.analysis.FisioParserRunner.parse(codigo);
+            comprobar(lexicoEjemplo.errores().isEmpty(), ejemplo.getKey() + " tiene errores léxicos");
+            comprobar(sintaxisEjemplo.errores().isEmpty(), ejemplo.getKey() + " tiene errores sintácticos");
+            var semanticaEjemplo = fisio.semantic.FisioSemanticRunner.analizar(lexicoEjemplo, sintaxisEjemplo);
+            if (ejemplo.getKey().equals("Errores semánticos")) {
+                comprobar(semanticaEjemplo.analizado() && !semanticaEjemplo.errores().isEmpty(),
+                    "El ejemplo de errores no contiene diagnósticos semánticos");
+            } else {
+                comprobar(semanticaEjemplo.exitoso(),
+                    ejemplo.getKey() + " tiene errores semánticos: " + semanticaEjemplo.errores());
+            }
+        }
+        var astCompuesto = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - structs, enums y match"));
+        String arbolCompuesto = String.join("\n", FormateadorAst.formatear(astCompuesto.ast()));
+        comprobar(astCompuesto.errores().isEmpty() && arbolCompuesto.contains("NodoStruct")
+            && arbolCompuesto.contains("NodoEnum") && arbolCompuesto.contains("NodoMatch")
+            && arbolCompuesto.contains("NodoAccesoCampo"), "La GUI no representa el AST de tipos compuestos");
+        var astEnumsNombrados = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - enums nombrados y guardas"));
+        String arbolEnumsNombrados = String.join("\n", FormateadorAst.formatear(astEnumsNombrados.ast()));
+        comprobar(astEnumsNombrados.errores().isEmpty()
+            && arbolEnumsNombrados.contains("Mover { x: i32, y: i32 }")
+            && arbolEnumsNombrados.contains("NodoLiteralVariante")
+            && arbolEnumsNombrados.contains("guarda Mensaje::Mover { x, y }")
+            && arbolEnumsNombrados.contains("x: horizontal"),
+            "La GUI no representa variantes nombradas, patrones o guardas");
+        var astPatronesParciales = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - actualización y patrones parciales"));
+        String arbolPatronesParciales = String.join("\n", FormateadorAst.formatear(astPatronesParciales.ast()));
+        comprobar(astPatronesParciales.errores().isEmpty()
+            && arbolPatronesParciales.contains("Punto { x, .. }")
+            && arbolPatronesParciales.contains("Color(rojo, ..)")
+            && arbolPatronesParciales.contains("base de actualización"),
+            "La GUI no representa actualizaciones struct o patrones parciales");
+        var astLetPatrones = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - if let y while let"));
+        String arbolLetPatrones = String.join("\n", FormateadorAst.formatear(astLetPatrones.ast()));
+        comprobar(astLetPatrones.errores().isEmpty()
+            && arbolLetPatrones.contains("NodoIfLet") && arbolLetPatrones.contains("NodoWhileLet")
+            && arbolLetPatrones.contains("patron='Evento::Dato { valor, .. }'")
+            && arbolLetPatrones.contains("guarda"),
+            "La GUI no representa if let, while let o sus patrones");
+        var astLetElse = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - let else"));
+        String arbolLetElse = String.join("\n", FormateadorAst.formatear(astLetElse.ast()));
+        comprobar(astLetElse.errores().isEmpty() && arbolLetElse.contains("NodoLetElse")
+            && arbolLetElse.contains("patron='Lectura::Dato { numero, .. }'")
+            && arbolLetElse.contains("cuerpoElse"),
+            "La GUI no representa let else o su ámbito de salida");
+        var astAnidados = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - patrones anidados"));
+        String arbolAnidados = String.join("\n", FormateadorAst.formatear(astAnidados.ast()));
+        comprobar(astAnidados.errores().isEmpty()
+            && arbolAnidados.contains("Mensaje::Dato(Opcion::Valor(numero))")
+            && arbolAnidados.contains("contenido: Opcion::Valor(numero)")
+            && arbolAnidados.contains("NodoLetElse"),
+            "La GUI no representa los patrones anidados");
+        var astColecciones = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - arreglos y tuplas"));
+        String arbolColecciones = String.join("\n", FormateadorAst.formatear(astColecciones.ast()));
+        comprobar(astColecciones.errores().isEmpty() && arbolColecciones.contains("NodoArreglo")
+            && arbolColecciones.contains("NodoTupla") && arbolColecciones.contains("NodoIndice")
+            && arbolColecciones.contains("NodoAccesoTupla"),
+            "La GUI no representa el AST de arreglos y tuplas");
+        var astConstantes = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - constantes"));
+        String arbolConstantes = String.join("\n", FormateadorAst.formatear(astConstantes.ast()));
+        comprobar(astConstantes.errores().isEmpty() && arbolConstantes.contains("NodoConstante")
+            && arbolConstantes.contains("nombre='BASE'") && arbolConstantes.contains("tipo='i32'"),
+            "La GUI no representa las constantes en el AST");
+        var astPublico = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - visibilidad pub"));
+        String arbolPublico = String.join("\n", FormateadorAst.formatear(astPublico.ast()));
+        comprobar(astPublico.errores().isEmpty() && arbolPublico.contains("publico=true")
+            && arbolPublico.contains("pub valor: i32"), "La GUI no representa la visibilidad pub");
+        var astAlias = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - alias de tipos"));
+        String arbolAlias = String.join("\n", FormateadorAst.formatear(astAlias.ast()));
+        comprobar(astAlias.errores().isEmpty() && arbolAlias.contains("NodoAliasTipo")
+            && arbolAlias.contains("nombre='Entero'") && arbolAlias.contains("tipo='i32'"),
+            "La GUI no representa los alias de tipos");
+        var astStatic = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - elementos static"));
+        String arbolStatic = String.join("\n", FormateadorAst.formatear(astStatic.ast()));
+        comprobar(astStatic.errores().isEmpty() && arbolStatic.contains("NodoEstatico")
+            && arbolStatic.contains("nombre='VERSION'") && arbolStatic.contains("mutable=false"),
+            "La GUI no representa elementos static");
+        var astReferencias = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - referencias"));
+        String arbolReferencias = String.join("\n", FormateadorAst.formatear(astReferencias.ast()));
+        comprobar(astReferencias.errores().isEmpty() && arbolReferencias.contains("NodoReferencia")
+            && arbolReferencias.contains("NodoDesreferencia") && arbolReferencias.contains("mutable=true"),
+            "La GUI no representa referencias compartidas y mutables");
+        var astImpl = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - impl y metodos"));
+        String arbolImpl = String.join("\n", FormateadorAst.formatear(astImpl.ast()));
+        comprobar(astImpl.errores().isEmpty() && arbolImpl.contains("NodoImpl")
+            && arbolImpl.contains("NodoLlamadaAsociada") && arbolImpl.contains("NodoLlamadaMetodo")
+            && arbolImpl.contains("tipo='Punto'"), "La GUI no representa bloques impl y métodos");
+        var astTraits = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - traits"));
+        String arbolTraits = String.join("\n", FormateadorAst.formatear(astTraits.ast()));
+        comprobar(astTraits.errores().isEmpty() && arbolTraits.contains("NodoTrait")
+            && arbolTraits.contains("NodoFirmaTrait") && arbolTraits.contains("trait='Medible'")
+            && arbolTraits.contains("tipo='Medicion'"), "La GUI no representa contratos trait");
+        var astAlgebraico = fisio.analysis.FisioParserRunner.parse(
+            EjemplosFisio.codigoDe("Rust-like - datos algebraicos"));
+        String arbolAlgebraico = String.join("\n", FormateadorAst.formatear(astAlgebraico.ast()));
+        comprobar(astAlgebraico.errores().isEmpty() && arbolAlgebraico.contains("tupla=true")
+            && arbolAlgebraico.contains("Exito(i32)") && arbolAlgebraico.contains("Par(a, b)"),
+            "La GUI no representa structs de tupla, variantes con datos y patrones");
+        var astChecklist = fisio.analysis.FisioParserRunner.parse(
+            "enum E { A } fn auxiliar() -> i32 { 1 } "
+                + "fn f(e: E) -> i32 { match e { E::A => auxiliar(), } }");
+        AtomicReference<String> checklist = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> {
+            PanelSintactico panel = new PanelSintactico();
+            panel.poblar(astChecklist.ast(), astChecklist.errores());
+            checklist.set(((JTextPane) campo(panel, "texto")).getText());
+        });
+        comprobar(checklist.get().contains("Llamada a una función"),
+            "El checklist sintáctico no recorre los nodos contenidos en brazos de match");
         SwingUtilities.invokeAndWait(() -> {
             ventana = new VentanaPrincipal();
             editor = (EditorCodigoPanel) campo(ventana, "editor");
             modulos = (Map<?, ?>) campo(ventana, "modulos");
         });
         try {
+            SwingUtilities.invokeAndWait(() -> {
+                JComboBox<?> selector = (JComboBox<?>) campo(ventana, "selectorEjemplos");
+                comprobar(EjemplosFisio.mapa().size() == 10, "El catálogo visible debe ser reducido");
+                comprobar(selector.getItemCount() == EjemplosFisio.mapa().size() + 1,
+                    "El selector no coincide con el catálogo de ejemplos");
+                comprobar(editor.getCodigo().equals(EjemplosFisio.codigoDe("Fundamentos")),
+                    "La GUI no inicia con el ejemplo de fundamentos");
+                comprobar(!EjemplosFisio.mapa().containsKey("Fase 2: negativos y tipos"),
+                    "El selector todavía muestra ejemplos antiguos");
+            });
             SwingUtilities.invokeAndWait(() -> {
                 accion("verSintactico"); estado("Sintáctico", EstadoAnalisis.NO_EJECUTADO);
                 accion("verSemantico"); estado("Semántico", EstadoAnalisis.NO_EJECUTADO);
@@ -196,11 +343,11 @@ public final class GuiRegression {
                 }
             });
             SwingUtilities.invokeAndWait(() -> {
-                invocar("cargarEjemplo", new Class<?>[]{String.class}, "Rust-like - funciones y println!");
+                invocar("cargarEjemplo", new Class<?>[]{String.class}, "Fundamentos");
                 estado("Semántico", EstadoAnalisis.NO_EJECUTADO);
                 estado("Código Intermedio (CI)", EstadoAnalisis.NO_EJECUTADO);
-                comprobar(editor.getCodigo().equals(EjemplosFisio.codigoDe("Rust-like - funciones y println!")), "Ejemplo incorrecto");
-                invocar("cargarEjemplo", new Class<?>[]{String.class}, "Rust-like - código intermedio (CI)");
+                comprobar(editor.getCodigo().equals(EjemplosFisio.codigoDe("Fundamentos")), "Ejemplo incorrecto");
+                invocar("cargarEjemplo", new Class<?>[]{String.class}, "Código intermedio");
                 comprobar(editor.getCodigo().contains("let resultado = (a + b) * 2 - 8 / 4;"), "Ejemplo de CI ausente");
                 estado("Código Intermedio (CI)", EstadoAnalisis.NO_EJECUTADO);
                 invocar("limpiarTodo", new Class<?>[0]);
@@ -208,6 +355,8 @@ public final class GuiRegression {
                 estado("Sintáctico", EstadoAnalisis.NO_EJECUTADO);
                 comprobar(editor.getCodigo().isEmpty(), "Limpiar no vació el editor");
                 comprobar(campo(ventana, "ultimoResultado") == null, "Limpiar conservó resultados");
+                JTextArea lexico = (JTextArea) campo(campo(ventana, "panelLexico"), "texto");
+                comprobar(lexico.getText().isEmpty(), "Limpiar conservó el reporte léxico anterior");
             });
             SwingUtilities.invokeAndWait(() -> estado("Semántico", EstadoAnalisis.NO_EJECUTADO));
             System.out.println("GUI PASS: pipeline completo, CI, navegación sin ejecución, AST parcial, invalidación, alfabetos y resaltado por módulo");

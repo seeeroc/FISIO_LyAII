@@ -72,17 +72,7 @@ public final class PanelAlfabeto extends JPanel {
         new Entrada(";", CategoriaToken.SIG, "SIG_07")
     );
 
-    /* ======================================================================
-       SECCION B: ALFABETO RUST-LIKE / FASE 2 (revision general).
-       Traduccion 1:1 de los tokens REALES definidos en
-       src/main/javacc/fisio/FISIO.jj y de los IDs REALES asignados en
-       fisio.token.MapeoTokens -- ningun dato aqui se inventa; si se agrega
-       o cambia un token en FISIO.jj, esta lista debe actualizarse para
-       seguir siendo exacta. No reemplaza ni borra PALABRAS_RESERVADAS /
-       OPERADORES_MATEMATICOS / OPERADORES_RELACIONALES / SIGNOS de arriba
-       (alfabeto FISIO original, seccion A): cada versión se presenta en
-       su propio módulo de referencia.
-       ====================================================================== */
+    // Los IDs coinciden con MapeoTokens y deben actualizarse junto con FISIO.jj.
     private static final List<Entrada> PALABRAS_RESERVADAS_RUST = List.of(
         new Entrada("fn", CategoriaToken.PR, "PR_01"),
         new Entrada("let", CategoriaToken.PR, "PR_02"),
@@ -132,9 +122,7 @@ public final class PanelAlfabeto extends JPanel {
         new Entrada(">=", CategoriaToken.OPR, "OPR_06")
     );
 
-    // "&&"/"||"/"!" son categoria SIG en MapeoTokens (igual que "=" o los
-    // signos de agrupacion) -- no se inventa una categoria "OPL" nueva solo
-    // por agruparlos visualmente aqui.
+    // Se agrupan visualmente como lógicos, aunque su categoría léxica sea SIG.
     private static final List<Entrada> OPERADORES_LOGICOS_RUST = List.of(
         new Entrada("&&", CategoriaToken.SIG, "SIG_19"),
         new Entrada("||", CategoriaToken.SIG, "SIG_20"),
@@ -160,8 +148,7 @@ public final class PanelAlfabeto extends JPanel {
         new Entrada("..=", CategoriaToken.SIG, "SIG_32")
     );
 
-    // Sin ASIGNACION/AND/OR/NEGACION/PUNTO (ya cubiertos en sus propias
-    // subsecciones arriba) para no duplicar filas.
+    // Omite los signos ya mostrados en las subsecciones anteriores.
     private static final List<Entrada> SIGNOS_RUST = List.of(
         new Entrada("(", CategoriaToken.SIG, "SIG_01"),
         new Entrada(")", CategoriaToken.SIG, "SIG_02"),
@@ -207,6 +194,8 @@ public final class PanelAlfabeto extends JPanel {
             new FilaTipo("SIG", "Signo", TemaFisio.COL_SIG),
             new FilaTipo("ID", "Identificador", TemaFisio.COL_ID),
             new FilaTipo("NUM", "Número", TemaFisio.COL_NUM),
+            new FilaTipo("STRING", "Cadena", TemaFisio.COL_STRING),
+            new FilaTipo("CHAR", "Carácter", TemaFisio.COL_STRING),
             new FilaTipo("ERROR", "Token inválido", TemaFisio.COL_ERROR)
         ));
         contenido.append("</body></html>");
@@ -222,7 +211,6 @@ public final class PanelAlfabeto extends JPanel {
         add(scroll, BorderLayout.CENTER);
     }
 
-    /** SECCION A (sin cambios de contenido, solo el titulo aclara que es la version anterior). */
     private void poblarSeccionFisioOriginal() {
         agregarTitulo("FISIO original · Lenguaje de física", 13);
         agregarSeparador();
@@ -261,17 +249,27 @@ public final class PanelAlfabeto extends JPanel {
         agregarTablaItems(SIGNOS, TemaFisio.COL_SIG);
     }
 
-    /** SECCION B (nueva): alfabeto de la gramática Rust-like REAL (FISIO.jj actual). */
     private void poblarSeccionRustLike() {
         agregarTitulo("Rust-like · Gramática actual", 13);
         agregarSeparador();
 
         agregarTexto(
-            "Subconjunto sintáctico académico inspirado en Rust: fn/let/mut, if/else, "
-          + "while, for..in, loop, return, bloques { }, expresiones con precedencia "
-          + "(||, &&, ==/!=, relacionales, +/-, */%, unario -/!), llamadas a función, "
-          + "macros mínimas tipo println!(...) y rangos (a..b). Sin ownership, "
-          + "borrowing, lifetimes, genéricos, traits reales, match, módulos ni "
+            "Subconjunto sintáctico académico inspirado en Rust: fn/let/mut, let else, if/else, if let, "
+          + "while, while let, for..in, loop, break, continue, return, bloques { }, expresiones con precedencia "
+          + "(||, &&, comparaciones, bit a bit, desplazamientos, +/-, */%, unario -/!), conversiones as, llamadas a función, "
+          + "macros mínimas tipo println!(...), elementos static inmutables, alias transparentes mediante type, "
+          + "referencias compartidas y mutables con &, &mut y desreferenciación mediante *, "
+          + "bloques impl con funciones asociadas y métodos self, &self y &mut self, "
+          + "contratos trait e implementaciones mediante impl Trait for Tipo, "
+          + "structs de tupla, variantes enum unitarias, posicionales o con campos, extracción mediante match, "
+          + "patrones parciales con .., patrones de variantes anidados y exhaustividad recursiva, guardas de match "
+          + "y guardas booleanas en if let/while let, "
+          + "además de vinculaciones persistentes mediante let else, "
+          + "visibilidad pub para items y campos de structs, "
+          + "constantes tipadas globales y locales, rangos (a..b), "
+          + "arreglos [T; N] con indexación, tuplas con acceso .0, "
+          + "structs con shorthand y actualización ..base, enums y match exhaustivo. Sin verificador completo de ownership/"
+          + "borrowing, lifetimes, genéricos, supertraits, módulos ni "
           + "ejecución real. Esta referencia incluye tokens reconocidos por el lexer; no todos tienen soporte sintáctico o semántico.",
             TemaFisio.fuenteUi(Font.PLAIN, 10));
         agregarSeparador();
@@ -317,6 +315,7 @@ public final class PanelAlfabeto extends JPanel {
             new FilaTipo("ID", "Identificador ASCII: letra o _; después admite dígitos", TemaFisio.COL_ID),
             new FilaTipo("NUM", "Número decimal sin sufijos ni exponentes", TemaFisio.COL_NUM),
             new FilaTipo("STRING", "Cadena Unicode entre comillas; admite escapes básicos", TemaFisio.COL_STRING),
+            new FilaTipo("CHAR", "Carácter Unicode entre comillas simples; admite escapes básicos", TemaFisio.COL_STRING),
             new FilaTipo("ERROR", "Carácter no reconocido", Color.decode("#ff5555"))
         ));
     }

@@ -1,5 +1,5 @@
 package fisio.ast;
 
-/** Equivalente de NodoAgrupacion(NodoAST): expresion: NodoAST. */
+/** Expresión delimitada por paréntesis. */
 public record NodoAgrupacion(int linea, int columna, NodoAST expresion) implements NodoAST {
 }
