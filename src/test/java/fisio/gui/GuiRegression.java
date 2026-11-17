@@ -84,6 +84,17 @@ public final class GuiRegression {
             catch (Exception e) { throw new AssertionError(e); }
         });
     }
+    private static void comprobarNumeracionSincronizada() {
+        JTextPane texto = (JTextPane) campo(editor, "texto");
+        JTextArea numeros = (JTextArea) campo(editor, "numeros");
+        JViewport vistaCodigo = (JViewport) SwingUtilities.getAncestorOfClass(JViewport.class, texto);
+        JViewport vistaNumeros = (JViewport) SwingUtilities.getAncestorOfClass(JViewport.class, numeros);
+        comprobar(vistaCodigo != null && vistaNumeros != null,
+            "El editor no conserva sus vistas de código y numeración");
+        comprobar(vistaCodigo.getViewPosition().y == vistaNumeros.getViewPosition().y,
+            "La numeración quedó desplazada: código=" + vistaCodigo.getViewPosition().y
+                + ", números=" + vistaNumeros.getViewPosition().y);
+    }
     public static void main(String[] args) throws Exception {
         try {
             EjemplosFisio.codigoDe("ejemplo inexistente");
@@ -390,6 +401,17 @@ public final class GuiRegression {
                     "La comparación completa no se abrió");
                 ((DialogoComparacion) campo(ventana, "dialogoComparacion")).setVisible(false);
             });
+            SwingUtilities.invokeAndWait(() -> {
+                PanelOptimizacion panel = (PanelOptimizacion) campo(ventana, "panelOptimizacion");
+                panel.seleccionarCambio(panel.getCambios().size() - 1);
+                accion("ejecutar");
+            });
+            esperar();
+            SwingUtilities.invokeAndWait(() -> {
+                invocar("seleccionar", new Class<?>[]{String.class}, "Sintáctico");
+                ventana.validate();
+            });
+            SwingUtilities.invokeAndWait(GuiRegression::comprobarNumeracionSincronizada);
             captura(1280, "gui-optimizacion.png");
             captura(900, "gui-optimizacion-compacta.png");
             SwingUtilities.invokeAndWait(() -> {

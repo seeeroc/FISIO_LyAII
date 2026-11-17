@@ -3,6 +3,7 @@ package fisio.gui;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Font;
+import java.awt.Point;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -16,6 +17,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextPane;
+import javax.swing.JViewport;
 import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -37,6 +39,7 @@ public final class EditorCodigoPanel extends JPanel {
 
     private final JTextPane texto;
     private final JTextArea numeros;
+    private final JScrollPane scroll;
     private final List<Runnable> listenersCambio = new ArrayList<>();
     private final List<BiConsumer<Integer, Integer>> listenersCursor = new ArrayList<>();
 
@@ -45,12 +48,21 @@ public final class EditorCodigoPanel extends JPanel {
     private final Style estiloLineaError;
     private final Map<String, Style> estilosPorCategoria = new LinkedHashMap<>();
     private Object resaltadoOptimizacion;
+    private boolean sincronizandoNumeracion;
 
     public EditorCodigoPanel() {
         super(new BorderLayout());
         setBackground(TemaFisio.BG_EDITOR);
 
-        texto = new JTextPane();
+        texto = new JTextPane() {
+            @Override
+            public boolean getScrollableTracksViewportWidth() {
+                if (getParent() instanceof JViewport viewport) {
+                    return getUI().getPreferredSize(this).width <= viewport.getWidth();
+                }
+                return true;
+            }
+        };
         texto.setBackground(TemaFisio.BG_EDITOR);
         texto.setForeground(TemaFisio.FG_MAIN);
         texto.setCaretColor(TemaFisio.ACCENT);
@@ -66,10 +78,11 @@ public final class EditorCodigoPanel extends JPanel {
         numeros.setFont(TemaFisio.fuenteMono(Font.PLAIN, 12));
         numeros.setBorder(BorderFactory.createEmptyBorder(6, 4, 6, 4));
 
-        JScrollPane scroll = new JScrollPane(texto);
+        scroll = new JScrollPane(texto);
         scroll.setRowHeaderView(numeros);
         scroll.setBorder(BorderFactory.createEmptyBorder());
         scroll.getVerticalScrollBar().setUnitIncrement(16);
+        scroll.getViewport().addChangeListener(evento -> sincronizarNumeracion());
 
         add(scroll, BorderLayout.CENTER);
 
@@ -159,6 +172,26 @@ public final class EditorCodigoPanel extends JPanel {
             sb.append(i);
         }
         numeros.setText(sb.toString());
+        sincronizarNumeracion();
+        SwingUtilities.invokeLater(this::sincronizarNumeracion);
+    }
+
+    /** Mantiene el margen en el mismo desplazamiento vertical que el código. */
+    private void sincronizarNumeracion() {
+        JViewport cabecera = scroll.getRowHeader();
+        if (sincronizandoNumeracion || cabecera == null) {
+            return;
+        }
+        int posicionCodigo = scroll.getViewport().getViewPosition().y;
+        if (cabecera.getViewPosition().y == posicionCodigo) {
+            return;
+        }
+        sincronizandoNumeracion = true;
+        try {
+            cabecera.setViewPosition(new Point(0, posicionCodigo));
+        } finally {
+            sincronizandoNumeracion = false;
+        }
     }
 
     public String getCodigo() {
@@ -188,6 +221,7 @@ public final class EditorCodigoPanel extends JPanel {
             texto.setCaretPosition(inicio);
             var rectangulo = texto.modelToView2D(inicio);
             if (rectangulo != null) texto.scrollRectToVisible(rectangulo.getBounds());
+            SwingUtilities.invokeLater(this::sincronizarNumeracion);
         } catch (BadLocationException ex) {
             throw new IllegalArgumentException("La línea indicada no existe en el editor.", ex);
         }
